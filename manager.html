@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PineTS Overlay — Scripts</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1118; --panel:#151823; --line:#262a36; --fg:#d1d4dc; --mut:#787b86; --acc:#00e5ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid; grid-template-columns: 280px 1fr; font: 13px -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+  aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside h1 { font-size: 15px; margin: 0; padding: 16px; color: var(--acc); }
+  #list { flex: 1; overflow: auto; }
+  .item { padding: 9px 16px; cursor: pointer; border-left: 3px solid transparent; display: flex; gap: 8px; align-items: center; }
+  .item:hover { background: #1b1f2c; }
+  .item.sel { background: #1b1f2c; border-left-color: var(--acc); }
+  .item .dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3f50; flex: none; }
+  .item .dot.on { background: #26a69a; } .item .dot.err { background: #ef5350; }
+  .item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .kind { font-size: 10px; color: var(--mut); text-transform: uppercase; }
+  .new { padding: 12px 16px; display: grid; gap: 6px; border-top: 1px solid var(--line); }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  input[type=text], input[type=number] { background: #0b0d13; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font: inherit; }
+  #name { flex: 1; min-width: 200px; }
+  button, .btn { background: #1e2230; color: var(--fg); border: 1px solid #2f3546; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; }
+  button:hover, .btn:hover { border-color: var(--acc); }
+  button.primary { background: #00a6bb; border-color: #00a6bb; color: #001015; font-weight: 600; }
+  button.danger:hover { border-color: #ef5350; color: #ef5350; }
+  textarea { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 14px 16px; background: #0b0d13; color: #e6e6e6;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4; white-space: pre; }
+  #status { padding: 8px 14px; border-top: 1px solid var(--line); font: 12px ui-monospace, Menlo, Consolas, monospace; color: var(--mut); white-space: pre-wrap; max-height: 120px; overflow: auto; }
+  #status.err { color: #ef5350; } #status.ok { color: #26a69a; }
+  details { border-top: 1px solid var(--line); }
+  summary { padding: 10px 14px; cursor: pointer; color: var(--mut); }
+  .settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 20px; padding: 4px 14px 14px; }
+  .settings label { display: flex; gap: 8px; align-items: center; }
+  .settings small { color: var(--mut); display: block; margin-top: 2px; }
+  .empty { margin: auto; color: var(--mut); }
+  .saved { color: #26a69a; font-size: 12px; opacity: 0; transition: opacity .3s; }
+  .saved.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <aside>
+    <h1>PineTS Overlay</h1>
+    <div id="list"></div>
+    <div class="new">
+      <button id="newStrategy">+ New strategy</button>
+      <button id="newIndicator">+ New indicator</button>
+      <button id="newPane">+ New pane indicator (RSI-style)</button>
+      <label class="btn" style="text-align:center">Import .pine / .txt file<input type="file" id="import" accept=".pine,.txt,.js,.ts" hidden></label>
+    </div>
+  </aside>
+  <main>
+    <div class="bar" id="toolbar">
+      <input type="text" id="name" placeholder="Script name">
+      <label><input type="checkbox" id="enabled"> Show on chart</label>
+      <button id="settingsBtn" title="Inputs, properties, style &amp; visibility">⚙ Settings</button>
+      <button class="primary" id="save" title="Ctrl/Cmd+S">Save</button>
+      <span class="saved" id="savedMsg">Saved ✓</span>
+      <button class="danger" id="del">Delete</button>
+    </div>
+    <textarea id="code" spellcheck="false" placeholder="Paste your Pine Script (v5 or v6) here…"></textarea>
+    <div id="status">Select or create a script.</div>
+    <details id="settingsBox">
+      <summary>Settings</summary>
+      <div class="settings">
+        <label><input type="checkbox" id="s_enabled"> Overlay enabled</label>
+        <label><input type="checkbox" id="s_showTrades"> Show strategy trade markers</label>
+        <label><input type="checkbox" id="s_showHud"> Show info panel (P&amp;L, errors)</label>
+        <div><label><input type="checkbox" id="s_closedOnly"> Strategies use closed bars only</label><small>Prevents entries from appearing/disappearing while the current bar is still forming.</small></div>
+        <div><label>Max bars <input type="number" id="s_maxBars" min="100" max="50000" step="100" style="width:100px"></label><small>Most recent bars from the chart fed to PineTS. More bars = longer history, slower runs.</small></div>
+        <div><label>Point value $ <input type="number" id="s_pointValue" min="0" step="0.5" style="width:100px"></label><small>0 = auto (NQ $20, MNQ $2, ES $50, MES $5…). Used for $ P&amp;L in the info panel.</small></div>
+      </div>
+    </details>
+  </main>
+  <script src="store.js"></script>
+  <script src="settings-ui.js"></script>
+  <script src="manager.js"></script>
+</body>
+</html>

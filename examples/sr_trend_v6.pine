@@ -1,0 +1,71 @@
+//@version=6
+strategy("SR TREND STRATEGY", shorttitle="SR TREND", overlay=true, calc_on_order_fills=true, initial_capital=100000, margin_long=0, margin_short=0)
+// based on synapticEx SR indicator https://www.tradingview.com/script/O0F675Kv-Nebula-Advanced-Dynamic-Support-Resistance/
+
+// ── Inputs ──────────────────────────────────────────────
+length    = input.int(21, "SR lookback length", group="Support / Resistance")
+trailPts  = input.float(20.0, "Trailing stop distance (points)", minval=0.0, group="Trailing Stop")
+showTrail = input.bool(true, "Show trailing stop line", group="Trailing Stop")
+
+// ── Swing pivots ────────────────────────────────────────
+h = bar_index > 5 and high[5] < high[4] and high[4] < high[3] and high[3] > high[2] and high[2] > high[1] ? 1 : 0
+l = bar_index > 5 and low[5] > low[4] and low[4] > low[3] and low[3] < low[2] and low[2] < low[1] ? 1 : 0
+ln = math.sum(l, length)
+hn = math.sum(h, length)
+hval = h > 0 ? high[3] : 0.0
+lval = l > 0 ? low[3] : 0.0
+lsum = math.sum(lval, length)
+hsum = math.sum(hval, length)
+r = ln > 0 and hn > 0 ? math.abs((hsum / hn) - (lsum / ln)) : 0.0
+
+// ── Levels ──────────────────────────────────────────────
+float lvalc = na
+float lvalr = na
+float hvalc = na
+float hvalr = na
+lvalc := lval != 0 and r > 0 ? lval : lvalc[1]
+lvalr := lval != 0 and r > 0 ? lval + r : lvalr[1]
+hvalc := hval != 0 and r > 0 ? hval : hvalc[1]
+hvalr := hval != 0 and r > 0 ? hval - r : hvalr[1]
+
+// ── Trend ───────────────────────────────────────────────
+int trend = 0
+trend := close > lvalr and close > hvalr ? 1 : close < lvalr and close < hvalr ? -1 : nz(trend[1])
+
+// ── Orders ──────────────────────────────────────────────
+if trend == -1
+    strategy.close("Long")
+if trend == 1
+    strategy.close("Short")
+if trend == 1 and close > hvalc
+    strategy.entry("Long", strategy.long)
+if trend == -1 and close < lvalc
+    strategy.entry("Short", strategy.short)
+
+// ── Trailing stop ───────────────────────────────────────
+// Starts trailPts away from entry, then follows the highest high (longs)
+// or lowest low (shorts) since entry. It only ever moves in your favour.
+var float trailStop = na
+ep = strategy.position_avg_price
+
+if strategy.position_size > 0
+    newStop = math.max(ep, high) - trailPts
+    trailStop := strategy.position_size[1] > 0 and not na(trailStop) ? math.max(trailStop, newStop) : newStop
+else if strategy.position_size < 0
+    newStop = math.min(ep, low) + trailPts
+    trailStop := strategy.position_size[1] < 0 and not na(trailStop) ? math.min(trailStop, newStop) : newStop
+else
+    trailStop := na
+
+strategy.exit("L Trail", from_entry="Long", stop=trailStop)
+strategy.exit("S Trail", from_entry="Short", stop=trailStop)
+
+// ── Bar colors ──────────────────────────────────────────
+int longState = 0
+int shortState = 0
+longState := trend == 1 and close > hvalc ? 1 : trend == -1 ? -1 : nz(longState[1])
+shortState := trend == -1 and close < lvalc ? 1 : trend == 1 ? -1 : nz(shortState[1])
+barcolor(longState > 0 ? color.green : shortState > 0 ? color.red : trend > 0 ? color.white : trend < 0 ? color.orange : color.blue)
+
+// ── Trailing stop line on chart ─────────────────────────
+plot(showTrail ? trailStop : na, title="Trailing Stop", color=color.red, linewidth=2, style=plot.style_linebr)
