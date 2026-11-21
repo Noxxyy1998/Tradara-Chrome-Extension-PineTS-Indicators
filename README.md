@@ -30,6 +30,7 @@ entry/exit arrows, trade lines and a performance panel. It's powered by LuxAlgo'
   - `label.new`, `line.new`, `box.new`, `linefill`, `polyline`
 - **`overlay=false` scripts** (RSI, MACD…) draw in a strip at the bottom of the chart
 - **Higher-timeframe `request.security`** on the same symbol, built from the chart's own bars
+- **Chart notes**: put your own text boxes on the chart (signal guides, trading rules, checklists) that you can drag, resize and collapse
 - **Self-healing**: if the page interferes with the extension, it restarts itself automatically
 - **Private**: makes no network requests. Your scripts and settings stay in your browser.
 
@@ -91,6 +92,19 @@ Each active script appears in a box at the top right of the Tradara chart:
 - **👁** hides or shows the script without turning it off.
 - Strategies show net P&L, trades, win rate, profit factor, max drawdown and current position.
 - Errors appear here in red, so you don't have to open the manager to see them.
+
+### Chart notes
+Text boxes that sit on your chart, useful for memorizing what an indicator's signals mean or keeping your trading rules in
+view. A **Signal guide** example is included.
+- In the manager, under **Chart notes**, click **+ New note**, give it a title and type or paste your text. It saves as you
+  type.
+- Wrap words in `**double asterisks**` to make them **bold**.
+- Options: text size, background opacity, title color, **Reset position**.
+- On the chart: **drag the title bar** to move the box, **drag the bottom-right corner** to resize it, **▾** collapses it
+  to just the title, and **×** hides it. Turn it back on from the extension popup, which has a switch for each note.
+- Position and size are remembered, and the box stays in the same spot relative to the chart when you resize the window.
+
+![A chart note on the chart](docs/images/chart-note.png)
 
 ---
 
@@ -212,6 +226,7 @@ page.js                Chart detection, rendering, legend
 content.js             Storage, messaging, engine watchdog
 sandbox.html/.js       PineTS runner
 settings-ui.js         Inputs / Properties / Style / Visibility dialog
+notes.js               Chart notes editor (manager page)
 popup.html/.js         Toolbar popup
 manager.html/.js       Script manager & editor
 store.js               Shared storage helpers & templates

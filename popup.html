@@ -13,6 +13,8 @@
   li .st { font-size: 11px; color: #787b86; }
   li .st.err { color: #ef5350; }
   .empty { padding: 14px; color: #787b86; }
+  .sh { padding: 8px 14px 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #787b86; border-top: 1px solid #262a36; }
+  #notes .empty { padding: 8px 14px 12px; }
   footer { padding: 10px 14px; border-top: 1px solid #262a36; display: flex; gap: 8px; }
   button { flex: 1; background: #1e2230; color: #d1d4dc; border: 1px solid #2f3546; border-radius: 6px; padding: 7px; cursor: pointer; font: inherit; }
   button:hover { border-color: #00e5ff; }
@@ -27,6 +29,8 @@
 <body>
   <header><b>PineTS Overlay</b><label class="switch" title="Overlay on/off"><input type="checkbox" id="master"><span></span></label></header>
   <ul id="list"></ul>
+  <div class="sh">Chart notes</div>
+  <ul id="notes"></ul>
   <footer><button id="open">Manage scripts &amp; settings</button></footer>
   <script src="store.js"></script>
   <script src="popup.js"></script>

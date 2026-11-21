@@ -50,6 +50,33 @@ hline(30, "Oversold", color=color.green)
 `,
 };
 
+const EXAMPLE_NOTE = {
+  title: 'Signal guide',
+  text: `There are 4 different signals this indicator can print:
+
+1. A **green arrow** indicates a move of strength to the upside has begun. Could be a bull trap or the start of a long lasting bullish move.
+2. An **orange arrow** indicates a move of strength to the downside has begun. Could be a bear trap or the start of a long lasting bearish move.
+3. A **blue cross** is printed above if the break was to the upside, or below if it was to the downside. Indicates a failed attempt to change the trend and bullish price action is more likely in the next few candles.
+4. A **red cross** is printed above if the break was to the upside, or below if it was to the downside. Indicates a failed attempt to change the trend and bearish price action is more likely in the next few candles.
+
+The location of the cross is more important than the colour. **Above** means pressure downwards, and **below** means pressure upwards.`,
+};
+
+function newNote(fields) {
+  return { id: crypto.randomUUID(), title: 'New note', text: '', enabled: true, x: 0.02, y: 0.1, w: 380, fontSize: 13, opacity: 0.88, accent: '#00e5ff', collapsed: false, ...fields };
+}
+
+async function loadNotes() {
+  const d = await chrome.storage.local.get('notes');
+  let notes = d.notes;
+  if (!Array.isArray(notes)) {
+    notes = [newNote(EXAMPLE_NOTE)];
+    await chrome.storage.local.set({ notes });
+  }
+  return notes;
+}
+async function saveNotes(notes) { await chrome.storage.local.set({ notes }); }
+
 async function loadAll() {
   const d = await chrome.storage.local.get(['settings', 'scripts', 'status']);
   let scripts = d.scripts;

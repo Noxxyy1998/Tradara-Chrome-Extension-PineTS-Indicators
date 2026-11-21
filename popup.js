@@ -59,8 +59,33 @@ async function render() {
   }
 }
 
+let notesSig = '';
+async function renderNotes() {
+  const notes = await loadNotes();
+  const ul = document.getElementById('notes');
+  const sig = JSON.stringify(notes.map((n) => [n.id, n.title, !!n.enabled]));
+  if (sig === notesSig) return;
+  notesSig = sig;
+  ul.innerHTML = '';
+  if (!notes.length) { ul.innerHTML = '<div class="empty">No notes. Add one in the manager.</div>'; return; }
+  for (const n of notes) {
+    const li = document.createElement('li');
+    li.innerHTML = `<label class="switch"><input type="checkbox" ${n.enabled ? 'checked' : ''}><span></span></label><div class="name"></div>`;
+    li.querySelector('.name').textContent = n.title || 'Note';
+    li.querySelector('input').onchange = async (e) => {
+      const fresh = await loadNotes();
+      const t = fresh.find((x) => x.id === n.id);
+      if (t) t.enabled = e.target.checked;
+      await saveNotes(fresh);
+    };
+    ul.appendChild(li);
+  }
+}
+
 document.getElementById('open').onclick = () => chrome.runtime.openOptionsPage();
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.scripts || changes.settings || changes.status) render();
+  if (changes.notes) renderNotes();
 });
 render();
+renderNotes();

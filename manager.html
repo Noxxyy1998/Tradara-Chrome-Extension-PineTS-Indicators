@@ -9,7 +9,7 @@
   body { margin: 0; height: 100vh; display: grid; grid-template-columns: 280px 1fr; font: 13px -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--fg); }
   aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
   aside h1 { font-size: 15px; margin: 0; padding: 16px; color: var(--acc); }
-  #list { flex: 1; overflow: auto; }
+  #list { }
   .item { padding: 9px 16px; cursor: pointer; border-left: 3px solid transparent; display: flex; gap: 8px; align-items: center; }
   .item:hover { background: #1b1f2c; }
   .item.sel { background: #1b1f2c; border-left-color: var(--acc); }
@@ -36,6 +36,17 @@
   .settings label { display: flex; gap: 8px; align-items: center; }
   .settings small { color: var(--mut); display: block; margin-top: 2px; }
   .empty { margin: auto; color: var(--mut); }
+  .lists { flex: 1; overflow: auto; }
+  .sh { padding: 12px 16px 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); }
+  .addnote { margin: 6px 16px 12px; width: calc(100% - 32px); }
+  #scriptPanel, #notePanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  #scriptPanel[hidden], #notePanel[hidden] { display: none; }
+  .bar.opts { gap: 16px; font-size: 12px; }
+  .bar.opts label { display: flex; gap: 6px; align-items: center; }
+  .bar.opts select { background: #0b0d13; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+  .muted { color: var(--mut); }
+  textarea.notetext { font: 14px/1.55 -apple-system, Segoe UI, Roboto, sans-serif; white-space: pre-wrap; }
+  body.mode-note #list .item.sel { background: none; border-left-color: transparent; }
   .saved { color: #26a69a; font-size: 12px; opacity: 0; transition: opacity .3s; }
   .saved.show { opacity: 1; }
 </style>
@@ -43,7 +54,13 @@
 <body>
   <aside>
     <h1>PineTS Overlay</h1>
-    <div id="list"></div>
+    <div class="lists">
+      <div class="sh">Scripts</div>
+      <div id="list"></div>
+      <div class="sh">Chart notes</div>
+      <div id="noteList"></div>
+      <button id="newNote" class="addnote">+ New note</button>
+    </div>
     <div class="new">
       <button id="newStrategy">+ New strategy</button>
       <button id="newIndicator">+ New indicator</button>
@@ -52,6 +69,23 @@
     </div>
   </aside>
   <main>
+    <section id="notePanel" hidden>
+      <div class="bar">
+        <input type="text" id="noteTitle" placeholder="Note title">
+        <label><input type="checkbox" id="noteEnabled"> Show on chart</label>
+        <span class="saved" id="noteSaved">Saved ✓</span>
+        <button id="noteResetPos" title="Move the box back to the top-left of the chart">Reset position</button>
+        <button class="danger" id="noteDel">Delete</button>
+      </div>
+      <div class="bar opts">
+        <label>Text size <select id="noteFont"><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>18</option><option>20</option></select></label>
+        <label>Background <input type="range" id="noteOpacity" min="0.3" max="1" step="0.05"></label>
+        <label>Title color <input type="color" id="noteAccent"></label>
+        <span class="muted">Tip: wrap words in **double asterisks** to make them bold. Drag the box on the chart to move it, and drag its bottom-right corner to resize it.</span>
+      </div>
+      <textarea id="noteText" class="notetext" spellcheck="true" placeholder="Type or paste your note…"></textarea>
+    </section>
+    <section id="scriptPanel">
     <div class="bar" id="toolbar">
       <input type="text" id="name" placeholder="Script name">
       <label><input type="checkbox" id="enabled"> Show on chart</label>
@@ -62,6 +96,7 @@
     </div>
     <textarea id="code" spellcheck="false" placeholder="Paste your Pine Script (v5 or v6) here…"></textarea>
     <div id="status">Select or create a script.</div>
+    </section>
     <details id="settingsBox">
       <summary>Settings</summary>
       <div class="settings">
@@ -77,5 +112,6 @@
   <script src="store.js"></script>
   <script src="settings-ui.js"></script>
   <script src="manager.js"></script>
+  <script src="notes.js"></script>
 </body>
 </html>

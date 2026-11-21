@@ -15,6 +15,7 @@
 
   let settings = { ...DEFAULT_SETTINGS };
   let scripts = [];
+  let notes = [];
   let frame = null;
   let frameReady = false;
   let frameBornAt = 0;
@@ -36,6 +37,7 @@
     toPage({
       type: 'config',
       settings,
+      notes,
       scripts: scripts.map(({ id, name, enabled, settings: ss }) => {
         const m = mergeSettings(ss);
         return { id, name, enabled, settings: { hidden: m.hidden, style: m.style, visibility: m.visibility, maxTradesPerDay: m.maxTradesPerDay } };
@@ -213,6 +215,7 @@
     if (m.type === 'hello') { sendConfig(); return; }
     if (m.type === 'openSettings' && window.PTOSettings) { window.PTOSettings.open(m.scriptId, { tab: m.tab }); return; }
     if (m.type === 'toggleHidden') { setHidden(m.scriptId, !!m.hidden); return; }
+    if (m.type === 'noteUpdate') { updateNote(m.id, m.patch); return; }
     if (m.type === 'bars') {
       lastBars.set(m.chartKey, m);
       runAll(m.chartKey);
@@ -223,17 +226,29 @@
     }
   });
 
+  async function updateNote(id, patch) {
+    const allowed = ['x', 'y', 'w', 'collapsed', 'enabled'];
+    const d = await chrome.storage.local.get('notes');
+    const list = Array.isArray(d.notes) ? d.notes : [];
+    const n = list.find((x) => x.id === id);
+    if (!n || !patch) return;
+    for (const k of allowed) if (k in patch) n[k] = patch[k];
+    await chrome.storage.local.set({ notes: list });
+  }
+
   async function load() {
-    const data = await chrome.storage.local.get(['settings', 'scripts']);
+    const data = await chrome.storage.local.get(['settings', 'scripts', 'notes']);
+    notes = Array.isArray(data.notes) ? data.notes : (typeof loadNotes === 'function' ? await loadNotes() : []);
     settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
     cfgVersion++;
     scripts = Array.isArray(data.scripts) ? data.scripts : [];
   }
 
   chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area !== 'local' || (!changes.settings && !changes.scripts)) return;
+    if (area !== 'local' || (!changes.settings && !changes.scripts && !changes.notes)) return;
     await load();
     sendConfig();
+    if (!changes.settings && !changes.scripts) return; // notes only: no need to re-run scripts
     for (const k of lastBars.keys()) runAll(k);
   });
 

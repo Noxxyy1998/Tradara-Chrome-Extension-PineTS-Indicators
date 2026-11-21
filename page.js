@@ -12,6 +12,7 @@
 
   let config = { settings: { enabled: true, maxBars: 5000, strategyClosedBarsOnly: true, showTrades: true, showHud: true, pointValue: 0 }, scripts: [] };
   let configVersion = 0;
+  let notes = []; // chart notes (text boxes) from the manager
   let chartSeq = 0;
   const charts = new Map(); // chartKey -> state
   const keyByCanvas = new WeakMap();
@@ -41,6 +42,7 @@
     if (!m || m[TAG] !== true || m.dir !== 'toPage') return;
     if (m.type === 'config') {
       config = { settings: m.settings, scripts: m.scripts };
+      notes = Array.isArray(m.notes) ? m.notes : [];
       configVersion++;
       // drop results for scripts that were removed/disabled
       const live = new Set(config.scripts.filter((s) => s.enabled && !(s.settings && s.settings.hidden)).map((s) => s.id));
@@ -111,6 +113,7 @@
       if (!seen.has(key) && !st.canvas.isConnected) {
         st.overlay.remove();
         if (st.legendHost) st.legendHost.remove();
+        if (st.notesHost) st.notesHost.remove();
         charts.delete(key);
         toContent({ type: 'chartGone', chartKey: key });
       }
@@ -302,6 +305,7 @@
     overlay.style.left = canvas.offsetLeft + 'px'; overlay.style.top = canvas.offsetTop + 'px';
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, cssW, cssH);
+    renderNotes(st);
     if (!config.settings.enabled || !st.bars) { if (st.legendHost) st.legendHost.style.display = 'none'; return; }
 
     const pane = (ctl.mainPaneFrame && ctl.mainPaneFrame()) || { top: 0, bottom: cssH, width: cssW };
@@ -774,6 +778,123 @@
     st.legendHost.style.display = config.settings.enabled && items.length ? '' : 'none';
   }
 
+  // ---------- chart notes (draggable text boxes) ----------
+  const NOTES_CSS = `
+    :host { all: initial; }
+    .layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .note { position: absolute; pointer-events: auto; box-sizing: border-box; min-width: 140px; max-width: 95%;
+      background: rgba(14,16,24,var(--bg,0.88)); border: 1px solid rgba(255,255,255,.16); border-radius: 8px;
+      box-shadow: 0 6px 20px rgba(0,0,0,.35); color: #e3e6ee; font: var(--fs,13px)/1.45 -apple-system, Segoe UI, Roboto, sans-serif;
+      resize: horizontal; overflow: hidden; }
+    .hd { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; cursor: move; user-select: none;
+      border-bottom: 1px solid rgba(255,255,255,.08); }
+    .note.collapsed .hd { border-bottom: 0; }
+    .ttl { flex: 1; font-weight: 700; color: var(--accent,#00e5ff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    button { all: unset; cursor: pointer; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 4px; color: #b2b5be; font: 14px/1 sans-serif; }
+    button:hover { background: rgba(255,255,255,.12); color: #fff; }
+    .bd { padding: 8px 12px 10px; white-space: pre-wrap; word-wrap: break-word; overflow: auto; }
+    .note.collapsed .bd { display: none; }
+    b { color: #fff; }
+  `;
+
+  function noteHtml(text) {
+    // plain text with **bold** support; everything else is escaped
+    return esc(text || '').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  }
+
+  function ensureNotesHost(st) {
+    if (st.notesHost && st.notesHost.isConnected) return;
+    const host = document.createElement('div');
+    host.dataset.pinetsOverlay = 'notes';
+    Object.assign(host.style, { position: 'absolute', zIndex: '4', pointerEvents: 'none' });
+    st.canvas.parentElement.appendChild(host);
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `<style>${NOTES_CSS}</style><div class="layer"></div>`;
+    st.notesHost = host; st.notesLayer = root.querySelector('.layer'); st.noteEls = new Map();
+  }
+
+  function saveNote(id, patch) { toContent({ type: 'noteUpdate', id, patch }); }
+
+  function makeNoteEl(st, n) {
+    const el = document.createElement('div');
+    el.className = 'note';
+    el.innerHTML = `<div class="hd"><span class="ttl"></span><button class="col" title="Collapse">▾</button><button class="cls" title="Hide (turn back on from the extension popup)">×</button></div><div class="bd"></div>`;
+    for (const ev of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick', 'wheel', 'contextmenu', 'touchstart', 'keydown']) el.addEventListener(ev, (e) => e.stopPropagation());
+    const hd = el.querySelector('.hd');
+    hd.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      const layer = st.notesLayer.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const dx = e.clientX - box.left, dy = e.clientY - box.top;
+      el.dataset.dragging = '1';
+      hd.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const x = Math.max(0, Math.min(layer.width - 40, ev.clientX - layer.left - dx));
+        const y = Math.max(0, Math.min(layer.height - 24, ev.clientY - layer.top - dy));
+        el.style.left = x + 'px'; el.style.top = y + 'px';
+      };
+      const up = () => {
+        hd.removeEventListener('pointermove', move); hd.removeEventListener('pointerup', up); hd.removeEventListener('pointercancel', up);
+        delete el.dataset.dragging;
+        const L = st.notesLayer.getBoundingClientRect();
+        saveNote(n.id, { x: +(el.offsetLeft / Math.max(1, L.width)).toFixed(4), y: +(el.offsetTop / Math.max(1, L.height)).toFixed(4) });
+      };
+      hd.addEventListener('pointermove', move); hd.addEventListener('pointerup', up); hd.addEventListener('pointercancel', up);
+    });
+    el.querySelector('.col').addEventListener('click', () => saveNote(el.dataset.id, { collapsed: !el.classList.contains('collapsed') }));
+    el.querySelector('.cls').addEventListener('click', () => saveNote(el.dataset.id, { enabled: false }));
+    // width changes from the resize handle (bottom-right corner)
+    let rt = null;
+    new ResizeObserver(() => {
+      clearTimeout(rt);
+      rt = setTimeout(() => {
+        const w = Math.round(el.offsetWidth);
+        if (!el.isConnected || el.classList.contains('collapsed')) return;
+        if (Math.abs(w - Number(el.dataset.w || 0)) > 3) { el.dataset.w = String(w); saveNote(el.dataset.id, { w }); }
+      }, 500);
+    }).observe(el);
+    return el;
+  }
+
+  function renderNotes(st) {
+    const list = (config.settings.enabled !== false && config.settings.showNotes !== false) ? notes.filter((n) => n && n.enabled) : [];
+    if (!list.length && !st.notesHost) return;
+    ensureNotesHost(st);
+    const c = st.canvas;
+    Object.assign(st.notesHost.style, { left: c.offsetLeft + 'px', top: c.offsetTop + 'px', width: c.clientWidth + 'px', height: c.clientHeight + 'px' });
+    const W = c.clientWidth, H = c.clientHeight;
+    const keep = new Set();
+    for (const n of list) {
+      keep.add(n.id);
+      let el = st.noteEls.get(n.id);
+      if (!el) { el = makeNoteEl(st, n); st.noteEls.set(n.id, el); st.notesLayer.appendChild(el); }
+      el.dataset.id = n.id;
+      const sig = JSON.stringify([n.title, n.text, n.fontSize, n.opacity, n.accent, n.collapsed]);
+      if (el.dataset.sig !== sig) {
+        el.dataset.sig = sig;
+        el.querySelector('.ttl').textContent = n.title || 'Note';
+        el.querySelector('.bd').innerHTML = noteHtml(n.text);
+        el.style.setProperty('--fs', (n.fontSize || 13) + 'px');
+        el.style.setProperty('--bg', String(n.opacity ?? 0.88));
+        el.style.setProperty('--accent', n.accent || '#00e5ff');
+        el.classList.toggle('collapsed', !!n.collapsed);
+        el.querySelector('.col').textContent = n.collapsed ? '▸' : '▾';
+      }
+      if (!el.dataset.dragging) {
+        const x = Math.round((n.x ?? 0.02) * W), y = Math.round((n.y ?? 0.08) * H);
+        el.style.left = Math.max(0, Math.min(W - 40, x)) + 'px';
+        el.style.top = Math.max(0, Math.min(H - 24, y)) + 'px';
+        const w = n.w || 380;
+        if (el.dataset.w !== String(w)) { el.dataset.w = String(w); el.style.width = w + 'px'; }
+        // keep the whole box inside the chart: long notes scroll instead of running off the bottom
+        const topPx = parseFloat(el.style.top) || 0;
+        el.querySelector('.bd').style.maxHeight = Math.max(60, H - topPx - 44) + 'px';
+      }
+    }
+    for (const [id, el] of st.noteEls) if (!keep.has(id)) { el.remove(); st.noteEls.delete(id); }
+  }
+
   // ---------- loop ----------
   function viewSignature(st) {
     const c = st.ctl;
@@ -792,6 +913,7 @@
         try {
           pollBars(st, now);
           if (!st.bars) continue;
+          if (st.notesCfg !== configVersion) { st.notesCfg = configVersion; renderNotes(st); }
           const sig = viewSignature(st);
           if (sig !== st.viewSig || st.dirty) { st.viewSig = sig; st.dirty = false; draw(st); }
         } catch (e) {

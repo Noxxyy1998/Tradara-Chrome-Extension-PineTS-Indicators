@@ -34,13 +34,20 @@ function renderList() {
     div.querySelector('.kind').textContent = kindOf(s.code || '');
     div.onclick = () => {
       if (dirty && !confirm('Discard unsaved changes?')) return;
-      selId = s.id; dirty = false; renderList(); renderEditor(); renderStatus();
+      selId = s.id; dirty = false; showScriptPanel(); listSig = ''; renderList(); renderEditor(); renderStatus();
     };
     list.appendChild(div);
   }
 }
 
 function current() { return state.scripts.find((s) => s.id === selId); }
+
+function showScriptPanel() {
+  document.body.classList.remove('mode-note');
+  $('scriptPanel').hidden = false;
+  $('notePanel').hidden = true;
+  if (window.notesDeselect) window.notesDeselect();
+}
 
 function renderEditor() {
   const s = current();
@@ -111,6 +118,7 @@ async function addScript(code, name) {
   fresh.push(s);
   selId = s.id;
   dirty = false;
+  showScriptPanel();
   await saveScripts(fresh);
 }
 
@@ -136,7 +144,7 @@ $('code').addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!document.body.classList.contains('mode-note')) save(); }
 });
 $('newStrategy').onclick = () => addScript(TEMPLATES.strategy);
 $('newIndicator').onclick = () => addScript(TEMPLATES.indicator);
