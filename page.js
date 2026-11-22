@@ -100,6 +100,7 @@
         keyByCanvas.set(canvas, key);
         st = makeState(key, canvas, ctl);
         charts.set(key, st);
+        hookUpdates(st);
         LOG('Attached to chart', key, label);
       } else if (!st.ctl || st.ctl.engine?.destroyed) {
         const ctl = findController(canvas);
@@ -117,6 +118,23 @@
         charts.delete(key);
         toContent({ type: 'chartGone', chartKey: key });
       }
+    }
+  }
+
+  // When Tradara pushes new data into the chart, check bars right away. Browsers pause animation frames and
+  // throttle timers in background tabs, so this keeps alerts on time while you're on another tab.
+  function hookUpdates(st) {
+    const targets = [[st.ctl, 'updateLastBar'], [st.ctl, 'setData'], [st.ctl.engine, 'updateLastBar'], [st.ctl.engine, 'setData']];
+    for (const [obj, name] of targets) {
+      const orig = obj && obj[name];
+      if (typeof orig !== 'function' || orig.__ptoHooked) continue;
+      const wrapped = function (...args) {
+        const r = orig.apply(this, args);
+        if (document.hidden) { try { st.nextBarsPoll = 0; queueMicrotask(() => { try { pollBars(st, performance.now()); } catch (_) {} }); } catch (_) {} }
+        return r;
+      };
+      wrapped.__ptoHooked = true;
+      try { obj[name] = wrapped; } catch (_) {}
     }
   }
 
@@ -375,10 +393,12 @@
         g.fillText(fmtNum(mn), PX1 - 4, bottom - 2);
       }
       const style = (o.s.settings && o.s.settings.style) || {};
-      const ctx = { g, ctl, X, yOf, off, iFrom, iTo, bs, top, bottom, PX0, PX1, bars, overlay: !o.band, style };
+      const ctx = { g, ctl, X, yOf, off, iFrom, iTo, bs, top, bottom, PX0, PX1, bars, overlay: !o.band, style, alerts: o.s.settings && o.s.settings.alerts };
       renderPlots(ctx, p);
       renderDrawings(ctx, p);
       if (p.strategy && config.settings.showTrades !== false) renderTrades(ctx, p, Y);
+      const al = o.s.settings && o.s.settings.alerts;
+      if (Array.isArray(p.alertSignals) && (!al || al.showTags !== false)) renderAlertTags(ctx, p);
     }
     g.restore();
 
@@ -718,6 +738,29 @@
     }
   }
 
+  // small "RSI 42" tag beyond each arrow that meets the alert rule
+  function renderAlertTags(c, p) {
+    const { g, X, yOf, off, bars, iFrom, iTo } = c;
+    if (!c.overlay) return;
+    const arrow = p.plots.find((x) => x.style === 'arrow');
+    const h = (arrow && (arrow.maxheight || arrow.minheight) || 35) * 0.8;
+    g.font = 'bold 10px -apple-system, Segoe UI, Roboto, sans-serif'; g.textAlign = 'center';
+    for (const sgl of p.alertSignals) {
+      if (sgl.i < iFrom || sgl.i > iTo) continue;
+      const bar = bars[off + sgl.i], x = X(off + sgl.i);
+      if (!bar || !isNum(x)) continue;
+      const up = sgl.dir > 0;
+      const y = up ? yOf(bar.low) + 4 + h + 3 : yOf(bar.high) - 4 - h - 3;
+      const lvl = (c.alerts && c.alerts.rsiLevel) ?? 50;
+      const txt = `RSI ${Math.round(sgl.rsi) === Number(lvl) ? sgl.rsi.toFixed(1) : Math.round(sgl.rsi)}`;
+      const w = g.measureText(txt).width + 8;
+      g.fillStyle = up ? 'rgba(76,175,80,0.9)' : 'rgba(255,152,0,0.9)';
+      roundRect(g, x - w / 2, up ? y : y - 14, w, 14, 3); g.fill();
+      g.fillStyle = '#0b0d13'; g.textBaseline = 'middle';
+      g.fillText(txt, x, up ? y + 7 : y - 7);
+    }
+  }
+
   // ---------- legend (TradingView-style, clickable) ----------
   const LEGEND_CSS = `
     :host { all: initial; }
@@ -735,6 +778,8 @@
   const ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
   const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 5.2A9.7 9.7 0 0 1 12 5c7 0 11 7 11 7a18.6 18.6 0 0 1-2.2 3.2M1 1l22 22"/></svg>';
   const ICON_GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+  const ICON_BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
+  const ICON_BELL_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.7 21a2 2 0 0 1-3.4 0M18.6 13A17.9 17.9 0 0 1 18 8M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14M18 8a6 6 0 0 0-9.3-5M1 1l22 22"/></svg>';
   const esc = (t) => String(t).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
   function ensureLegend(st) {
@@ -753,6 +798,7 @@
       e.preventDefault();
       const id = b.dataset.id;
       if (b.dataset.act === 'eye') toContent({ type: 'toggleHidden', scriptId: id, hidden: b.dataset.hidden !== '1' });
+      else if (b.dataset.act === 'bell') toContent({ type: 'toggleAlertVoice', scriptId: id, on: b.dataset.on !== '1' });
       else toContent({ type: 'openSettings', scriptId: id });
     });
   }
@@ -788,13 +834,21 @@
           lines.push({ t: `${pos > 0 ? 'LONG' : 'SHORT'} ${Math.abs(pos)} @ ${avg.toFixed(2)}  ${fmtMoney(upl * pv)}`, c: upl >= 0 ? '#26a69a' : '#ef5350' });
         } else lines.push({ t: 'Flat', c: '#787b86' });
       }
-      items.push({ id: s.id, title, hidden, off: hidden || tfOff, lines });
+      const al = ss.alerts || {};
+      const canAlert = !!(p && Array.isArray(p.alertSignals));
+      const bellOn = canAlert && al.enabled !== false && (al.voice || al.notify);
+      if (canAlert && !hidden && !tfOff && al.enabled !== false) {
+        const lvl = al.rsiLevel ?? 50;
+        lines.push({ t: `${bellOn ? '🔔' : '🔕'} Green < RSI ${lvl} · Orange > RSI ${lvl}`, c: bellOn ? '#d1d4dc' : '#787b86' });
+      }
+      items.push({ id: s.id, title, hidden, off: hidden || tfOff, lines, canAlert, bellOn });
     }
     ensureLegend(st);
     const html = items.map((it) => `
       <div class="item${it.off ? ' off' : ''}">
         <div class="head">
           <span class="name" data-act="gear" data-id="${esc(it.id)}" title="Settings">◆ ${esc(it.title)}</span>
+          ${it.canAlert ? `<button data-act="bell" data-id="${esc(it.id)}" data-on="${it.bellOn ? '1' : '0'}" title="${it.bellOn ? 'Mute voice alerts' : 'Turn voice alerts on'}">${it.bellOn ? ICON_BELL : ICON_BELL_OFF}</button>` : ''}
           <button data-act="eye" data-id="${esc(it.id)}" data-hidden="${it.hidden ? '1' : '0'}" title="${it.hidden ? 'Show' : 'Hide'}">${it.hidden ? ICON_EYE_OFF : ICON_EYE}</button>
           <button data-act="gear" data-id="${esc(it.id)}" title="Settings">${ICON_GEAR}</button>
         </div>
@@ -953,4 +1007,14 @@
     }
   }
   requestAnimationFrame(frame);
+
+  // rAF doesn't run in hidden tabs: keep reading bars (for alerts) with a timer
+  setInterval(() => {
+    if (!document.hidden) return;
+    const now = performance.now();
+    try {
+      if (now - lastDiscover > 1000) { lastDiscover = now; discover(); }
+      for (const st of charts.values()) { try { pollBars(st, now); } catch (_) {} }
+    } catch (_) {}
+  }, 1000);
 })();

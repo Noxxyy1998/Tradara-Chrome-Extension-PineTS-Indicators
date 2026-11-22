@@ -20,6 +20,13 @@
       },
       showInPanel: true,
     },
+    alerts: {
+      enabled: true, voice: true, notify: true, showTags: true,
+      rsiLength: 14, rsiLevel: 50,
+      voiceName: '', rate: 1, volume: 1,
+      bullText: '{symbol} {tf}: green arrow, RSI {rsi}. Bullish move.',
+      bearText: '{symbol} {tf}: orange arrow, RSI {rsi}. Bearish move.',
+    },
     visibility: {
       seconds: { on: true, min: 1, max: 59 }, minutes: { on: true, min: 1, max: 59 }, hours: { on: true, min: 1, max: 24 },
       days: { on: true, min: 1, max: 366 }, weeks: { on: true, min: 1, max: 52 }, months: { on: true, min: 1, max: 12 },
@@ -138,6 +145,7 @@
     let st = merge(script.settings);
     let tab = opts.tab || 'inputs';
     const isStrategy = meta ? meta.declType === 'strategy' : /^\s*strategy\s*\(/m.test(script.code || '');
+    const canAlert = /EMA Confirmation Break/.test(script.code || '');
 
     const host = el('div');
     host.setAttribute('data-pinets-overlay', 'dialog');
@@ -202,13 +210,64 @@
       if (tab === 'properties') { st.props = {}; st.maxTradesPerDay = 0; st.dayReset = 'session'; }
       if (tab === 'style') st.style = d.style;
       if (tab === 'visibility') st.visibility = d.visibility;
+      if (tab === 'alerts') st.alerts = d.alerts;
       commit();
     }
 
     const TABS = [['inputs', 'Inputs'], ['properties', 'Properties'], ['style', 'Style'], ['visibility', 'Visibility']];
+    if (canAlert) TABS.push(['alerts', 'Alerts']);
+    if (!TABS.some(([k]) => k === tab)) tab = 'inputs';
     function render() {
       tabsEl.replaceChildren(...TABS.map(([k, label]) => el('button', { class: 'tab' + (tab === k ? ' on' : ''), onclick: () => { tab = k; render(); } }, label)));
-      body.replaceChildren(...({ inputs: renderInputs, properties: renderProps, style: renderStyle, visibility: renderVisibility }[tab])());
+      body.replaceChildren(...({ inputs: renderInputs, properties: renderProps, style: renderStyle, visibility: renderVisibility, alerts: renderAlerts }[tab])());
+    }
+
+    // ---- Alerts (EMA Rejections voice notifications)
+    let voices = null;
+    function renderAlerts() {
+      const a = st.alerts;
+      const upd = (k, v) => { st.alerts = { ...st.alerts, [k]: v }; commit(); };
+      const voiceSel = el('select', { onchange: (e) => upd('voiceName', e.target.value) }, el('option', { value: '' }, 'Default voice'));
+      const fillVoices = () => {
+        for (const v of voices || []) voiceSel.append(el('option', { value: v.name, selected: v.name === a.voiceName ? true : null }, v.lang ? `${v.name} (${v.lang})` : v.name));
+      };
+      if (voices) fillVoices();
+      else {
+        try { chrome.runtime.sendMessage({ type: 'pto-voices' }, (list) => { void chrome.runtime.lastError; voices = Array.isArray(list) ? list : []; fillVoices(); }); } catch (_) { voices = []; }
+      }
+      const test = (dir) => {
+        const sample = { rsi: dir > 0 ? 42 : 61, price: 0 };
+        const tpl = dir > 0 ? a.bullText : a.bearText;
+        const text = String(tpl).replace(/\{symbol\}/gi, 'NQ').replace(/\{tf\}/gi, '1 minute').replace(/\{rsi\}/gi, String(sample.rsi)).replace(/\{price\}/gi, '');
+        try { chrome.runtime.sendMessage({ type: 'pto-alert', text, title: dir > 0 ? '▲ Green arrow (test)' : '▼ Orange arrow (test)', speak: true, notify: !!a.notify, voiceName: a.voiceName, rate: a.rate, volume: a.volume }, () => void chrome.runtime.lastError); } catch (_) {}
+      };
+      return [
+        el('div', { class: 'hint' }, `Calls out when a green arrow prints with RSI below ${a.rsiLevel}, or an orange arrow prints with RSI above ${a.rsiLevel}. Checked when the bar closes, once per signal. The Tradara tab must stay open (it can be in the background).`),
+        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.enabled, onchange: (e) => upd('enabled', e.target.checked) }), 'Alerts on'),
+        el('div', { class: 'sec' }, 'Rule'),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'RSI length'),
+          el('input', { type: 'number', min: 2, max: 200, step: 1, value: a.rsiLength, onchange: (e) => upd('rsiLength', Math.max(2, Math.round(Number(e.target.value) || 14))) })),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'RSI level'),
+          el('input', { type: 'number', min: 1, max: 99, step: 1, value: a.rsiLevel, onchange: (e) => upd('rsiLevel', Math.max(1, Math.min(99, Number(e.target.value) || 50))) })),
+        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.showTags, onchange: (e) => upd('showTags', e.target.checked) }), 'Show RSI tag on arrows that meet the rule'),
+        el('div', { class: 'sec' }, 'How to notify'),
+        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.voice, onchange: (e) => upd('voice', e.target.checked) }), 'Voice call-out'),
+        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.notify, onchange: (e) => upd('notify', e.target.checked) }), 'Pop-up notification'),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Voice'), voiceSel),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, `Speed (${a.rate}×)`),
+          el('input', { type: 'range', min: 0.5, max: 2, step: 0.1, value: a.rate, onchange: (e) => { upd('rate', Number(e.target.value)); render(); } })),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, `Volume (${Math.round(a.volume * 100)}%)`),
+          el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: a.volume, onchange: (e) => { upd('volume', Number(e.target.value)); render(); } })),
+        el('div', { class: 'sec' }, 'What it says'),
+        el('div', { class: 'hint' }, 'Placeholders: {symbol} {tf} {rsi} {price}'),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Green arrow'),
+          el('input', { type: 'text', value: a.bullText, onchange: (e) => upd('bullText', e.target.value) })),
+        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Orange arrow'),
+          el('input', { type: 'text', value: a.bearText, onchange: (e) => upd('bearText', e.target.value) })),
+        el('div', { class: 'ctl', style: 'margin-top:12px' },
+          el('button', { class: 'btn', onclick: () => test(1) }, '▶ Test green'),
+          el('button', { class: 'btn', onclick: () => test(-1) }, '▶ Test orange')),
+      ];
     }
 
     // ---- Inputs

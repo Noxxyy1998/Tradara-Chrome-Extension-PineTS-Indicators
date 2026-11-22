@@ -40,7 +40,8 @@
       notes,
       scripts: scripts.map(({ id, name, enabled, settings: ss }) => {
         const m = mergeSettings(ss);
-        return { id, name, enabled, settings: { hidden: m.hidden, style: m.style, visibility: m.visibility, maxTradesPerDay: m.maxTradesPerDay } };
+        return { id, name, enabled, settings: { hidden: m.hidden, style: m.style, visibility: m.visibility, maxTradesPerDay: m.maxTradesPerDay,
+          alerts: { enabled: m.alerts.enabled, voice: m.alerts.voice, notify: m.alerts.notify, showTags: m.alerts.showTags, rsiLevel: m.alerts.rsiLevel } } };
       }),
     });
   }
@@ -80,6 +81,63 @@
         await chrome.storage.local.set({ meta: all });
       } catch (_) { /* extension reloaded */ }
     }, 500);
+  }
+
+  // ---------- voice alerts ----------
+  const alertSeen = new Map(); // script|chart|symbol|tf -> time of the newest closed signal already handled
+
+  function tfWords(ms) {
+    const m = Math.round(ms / 60000);
+    if (ms < 60000) return `${Math.round(ms / 1000)} second`;
+    if (m < 60) return `${m} minute`;
+    if (m < 1440) return `${m / 60} hour`;
+    if (m < 10080) return 'daily';
+    return 'weekly';
+  }
+
+  // whole number unless rounding would land on the level (49.7 must not be read out as "50")
+  function rsiText(r, lvl) { return Math.round(r) === Number(lvl) ? r.toFixed(1) : String(Math.round(r)); }
+
+  function fill(tpl, x, b, lvl) {
+    return String(tpl || '')
+      .replace(/\{symbol\}/gi, String(b.symbol || '').replace(/^\//, ''))
+      .replace(/\{tf\}/gi, tfWords(b.tfMs))
+      .replace(/\{rsi\}/gi, rsiText(x.rsi, lvl))
+      .replace(/\{price\}/gi, String(x.price));
+  }
+
+  function handleAlerts(scriptId, chartKey, payload) {
+    const s = scripts.find((x) => x.id === scriptId);
+    const b = lastBars.get(chartKey);
+    if (!s || !b) return;
+    const a = mergeSettings(s.settings).alerts;
+    const key = `${scriptId}|${chartKey}|${b.symbol}|${b.tfMs}|${a.rsiLength}|${a.rsiLevel}`;
+    const closed = payload.alertSignals.filter((x) => !x.forming);
+    const newest = closed.length ? closed[closed.length - 1].t : 0;
+    if (!alertSeen.has(key)) { alertSeen.set(key, newest); return; } // first look: signals already on the chart are history
+    const seen = alertSeen.get(key);
+    const fresh = closed.filter((x) => x.t > seen && x.i >= payload.n - 3); // only signals on the last couple of closed bars
+    alertSeen.set(key, Math.max(seen, newest));
+    if (!fresh.length || !a.enabled || (!a.voice && !a.notify)) return;
+    const x = fresh[fresh.length - 1];
+    const text = fill(x.dir > 0 ? a.bullText : a.bearText, x, b, a.rsiLevel);
+    try {
+      chrome.runtime.sendMessage({
+        type: 'pto-alert', text, speak: !!a.voice, notify: !!a.notify,
+        title: `${x.dir > 0 ? '▲ Green arrow' : '▼ Orange arrow'}: ${String(b.symbol).replace(/^\//, '')} ${tfWords(b.tfMs)}`,
+        voiceName: a.voiceName, rate: a.rate, volume: a.volume,
+      }, () => void chrome.runtime.lastError);
+    } catch (_) { /* extension reloaded */ }
+  }
+
+  async function patchAlerts(id, patch) {
+    const d = await chrome.storage.local.get('scripts');
+    const list = Array.isArray(d.scripts) ? d.scripts : [];
+    const s = list.find((x) => x.id === id);
+    if (!s) return;
+    const cur = (s.settings && s.settings.alerts) || {};
+    s.settings = { ...(s.settings || {}), alerts: { ...cur, ...patch } };
+    await chrome.storage.local.set({ scripts: list });
   }
 
   async function setHidden(id, hidden) {
@@ -161,6 +219,8 @@
         bars, symbol: b.symbol, tf: b.tf, tfMs: b.tfMs,
         pointValueOverride: Number(settings.pointValue) || 0,
         settings: { inputs: ss.inputs, props: ss.props, maxTradesPerDay: ss.maxTradesPerDay, dayReset: ss.dayReset },
+        alerts: { rsiLength: ss.alerts.rsiLength, rsiLevel: ss.alerts.rsiLevel },
+        lastBarForming: !!b.lastBarForming,
       });
     }
   }
@@ -204,6 +264,7 @@
           applied.set(m.key, m.reqId);
           setStatus(m.scriptId, { ok: m.ok, error: m.error || null, ms: m.ms || null, warnings: m.warnings || [], at: Date.now() });
           toPage({ type: 'result', chartKey: m.chartKey, scriptId: m.scriptId, ok: m.ok, error: m.error, payload: m.payload });
+          if (m.ok && m.payload && Array.isArray(m.payload.alertSignals)) handleAlerts(m.scriptId, m.chartKey, m.payload);
         }
         flushPending();
       }
@@ -216,6 +277,7 @@
     if (m.type === 'openSettings' && window.PTOSettings) { window.PTOSettings.open(m.scriptId, { tab: m.tab }); return; }
     if (m.type === 'toggleHidden') { setHidden(m.scriptId, !!m.hidden); return; }
     if (m.type === 'noteUpdate') { updateNote(m.id, m.patch); return; }
+    if (m.type === 'toggleAlertVoice') { patchAlerts(m.scriptId, { voice: !!m.on, notify: !!m.on }); return; }
     if (m.type === 'bars') {
       lastBars.set(m.chartKey, m);
       runAll(m.chartKey);

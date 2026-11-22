@@ -30,6 +30,7 @@ entry/exit arrows, trade lines and a performance panel. It's powered by LuxAlgo'
   - `label.new`, `line.new`, `box.new`, `linefill`, `polyline`
 - **`overlay=false` scripts** (RSI, MACD…) draw in a strip at the bottom of the chart
 - **Higher-timeframe `request.security`** on the same symbol, built from the chart's own bars
+- **Voice alerts** for EMA Rejections, filtered by RSI, with a spoken call-out and a desktop notification
 - **Chart notes**: put your own text boxes on the chart (signal guides, trading rules, checklists) that you can drag, resize and collapse
 - **Self-healing**: if the page interferes with the extension, it restarts itself automatically
 - **Private**: makes no network requests. Your scripts and settings stay in your browser.
@@ -75,7 +76,21 @@ matching **signal guide** chart note:
 
 ![EMA Rejections on a chart](docs/images/ema-rejections.png)
 
-Change the EMA length (default 5) with ⚙ → Inputs. Source: [`examples/ema_rejections.pine`](examples/ema_rejections.pine).
+Change the EMA length (default 5) with ⚙ → Inputs.
+
+#### Voice alerts (EMA Rejections)
+The extension calls out loud, and can also show a desktop notification, when a signal meets the RSI rule:
+- **Green arrow** with **RSI below 50**: *"NQ 1 minute: green arrow, RSI 42. Bullish move."*
+- **Orange arrow** with **RSI above 50**: *"NQ 1 minute: orange arrow, RSI 61. Bearish move."*
+
+Arrows that don't meet the rule stay silent. Qualifying arrows get a small **RSI** tag on the chart.
+- Checked **when the bar closes**, once per signal. History is never read out when you open or refresh the page.
+- Works with Tradara in a **background tab**, but the tab must stay open.
+- **🔔** in the chart legend mutes or unmutes the alerts.
+- **⚙ → Alerts**: turn alerts on or off, set RSI length (14) and level (50), choose voice, speed, volume, notification
+  on/off, and what it says (`{symbol}` `{tf}` `{rsi}` `{price}`), with **Test** buttons.
+
+<img src="docs/images/settings-alerts.png" width="320" alt="Alerts settings"> Source: [`examples/ema_rejections.pine`](examples/ema_rejections.pine).
 
 An example strategy is also included in [`examples/sr_trend_v6.pine`](examples/sr_trend_v6.pine).
 
@@ -208,6 +223,7 @@ In the manager, under **Settings**:
 | "This is TradaraScript…" | Paste the original Pine Script instead of Tradara's converted version. |
 | Strategy shows **0 trades** | Set Long/Short leverage to `Infinity` in Properties, or lower the order size. |
 | Stuck on **Calculating…** | Wait a few seconds; the engine restarts itself. If it stays stuck, refresh Tradara. For more detail, open DevTools (F12) → Console and look for `[PineTS Overlay]` messages. |
+| No voice alerts | Check 🔔 isn't muted, ⚙ → Alerts → Test. Make sure Chrome notifications and your PC's sound aren't muted, and the Tradara tab is open. |
 | Overlay doesn't line up with candles | Refresh the Tradara tab. If it persists, Tradara may have changed its chart. Please open an issue. |
 
 ---
@@ -234,7 +250,8 @@ Tradara chart ──bars──▶ page.js ──▶ content.js ──▶ sandbox
 ```
 manifest.json          Extension manifest (Manifest V3)
 page.js                Chart detection, rendering, legend
-content.js             Storage, messaging, engine watchdog
+content.js             Storage, messaging, engine watchdog, alert logic
+background.js          Voice (chrome.tts) and desktop notifications
 sandbox.html/.js       PineTS runner
 settings-ui.js         Inputs / Properties / Style / Visibility dialog
 notes.js               Chart notes editor (manager page)

@@ -172,6 +172,48 @@ function prepareSource(src) {
   return s;
 }
 
+// RSI (Wilder / RMA, same as Pine's ta.rsi) on closes
+function rsiSeries(bars, len) {
+  const n = bars.length, out = new Array(n).fill(null);
+  if (n <= len) return out;
+  let ag = 0, al = 0;
+  for (let i = 1; i < n; i++) {
+    const ch = bars[i].close - bars[i - 1].close;
+    const g = ch > 0 ? ch : 0, l = ch < 0 ? -ch : 0;
+    if (i <= len) {
+      ag += g; al += l;
+      if (i < len) continue;
+      ag /= len; al /= len;
+    } else {
+      ag = (ag * (len - 1) + g) / len;
+      al = (al * (len - 1) + l) / len;
+    }
+    out[i] = al === 0 ? 100 : ag === 0 ? 0 : 100 - 100 / (1 + ag / al);
+  }
+  return out;
+}
+
+// EMA Rejections voice alerts: green arrow with RSI below the level, orange arrow with RSI above it.
+// Returns undefined for scripts without plotarrow() so the extension knows alerts don't apply.
+function alertSignals(m, bars, plots) {
+  const arrow = plots.find((p) => p.style === 'arrow');
+  if (!arrow || !/EMA Confirmation Break/.test(m.script.code || '')) return undefined;
+  const a = m.alerts || {};
+  const len = Math.max(2, Math.round(Number(a.rsiLength) || 14));
+  const level = Number.isFinite(Number(a.rsiLevel)) ? Number(a.rsiLevel) : 50;
+  const rsi = rsiSeries(bars, len);
+  const out = [];
+  for (let i = 0; i < bars.length; i++) {
+    const v = arrow.values[i];
+    if (typeof v !== 'number' || v === 0 || rsi[i] === null) continue;
+    const dir = v > 0 ? 1 : -1;
+    if ((dir === 1 && rsi[i] < level) || (dir === -1 && rsi[i] > level)) {
+      out.push({ i, t: bars[i].openTime, dir, rsi: Math.round(rsi[i] * 10) / 10, price: bars[i].close, forming: !!m.lastBarForming && i === bars.length - 1 });
+    }
+  }
+  return out;
+}
+
 function cleanMeta(x) {
   try { return JSON.parse(JSON.stringify(x)); } catch (_) { return { name: String(x && x.name) }; }
 }
@@ -353,7 +395,8 @@ async function runJob(m) {
 
     return {
       ...base, ok: true, ms: Math.round(performance.now() - t0),
-      payload: { title, overlay, isStrategy, n, firstTime: bars[0].openTime, plots, drawings, strategy, pointValue: info.pointvalue, mintick: info.mintick },
+      payload: { title, overlay, isStrategy, n, firstTime: bars[0].openTime, plots, drawings, strategy, pointValue: info.pointvalue, mintick: info.mintick,
+        alertSignals: alertSignals(m, bars, plots) },
       meta: { ...meta, plots: plots.map((x) => ({ title: x.title, style: x.style, color: x.color, linewidth: x.linewidth })) },
       warnings: warnings.concat((ctx.warnings || []).slice(0, 5).map(String)),
     };
