@@ -295,16 +295,22 @@ async function runJob(m) {
       const values = new Array(n).fill(null);
       const colors = new Array(n).fill(undefined);
       let anyColor = false;
+      let shapes = null, locs = null;
       for (const d of p.data || []) {
         const i = idxOf.get(d.time);
         if (i === undefined) continue;
         values[i] = toNum(d.value);
         if (d.options && 'color' in d.options) { colors[i] = col(d.options.color); anyColor = true; }
+        if (d.options && d.options.shape) { (shapes || (shapes = new Array(n).fill(null)))[i] = d.options.shape; }
+        if (d.options && d.options.location) { (locs || (locs = new Array(n).fill(null)))[i] = d.options.location; }
       }
+      const isArrow = opts.colorup !== undefined || opts.colordown !== undefined; // plotarrow()
       plots.push({
         title: p.title || key,
-        style,
-        color: col(opts.color),
+        style: isArrow ? 'arrow' : style,
+        minheight: opts.minheight, maxheight: opts.maxheight,
+        shapes, locs,
+        color: isArrow ? (col(opts.colorup) || '#4CAF50') : col(opts.color),
         linewidth: opts.linewidth || 1,
         shape: opts.shape, location: opts.location, size: opts.size, char: opts.char, text: opts.text,
         textcolor: col(opts.textcolor),

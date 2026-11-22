@@ -26,7 +26,7 @@ entry/exit arrows, trade lines and a performance panel. It's powered by LuxAlgo'
 - **Drawing support**:
   - `plot()`: line, step, area, histogram, columns, circles, cross
   - per-bar colors, `hline`, `fill`, `bgcolor`, `barcolor`
-  - `plotshape`, `plotchar`
+  - `plotshape`, `plotchar`, `plotarrow`
   - `label.new`, `line.new`, `box.new`, `linefill`, `polyline`
 - **`overlay=false` scripts** (RSI, MACD…) draw in a strip at the bottom of the chart
 - **Higher-timeframe `request.security`** on the same symbol, built from the chart's own bars
@@ -66,7 +66,18 @@ Download the new version, replace the files in the same folder, then click **rel
 4. Switch to your Tradara tab. The script appears on the chart within a second or two, with its name in the legend at the
    top right.
 
-An example strategy is included in [`examples/sr_trend_v6.pine`](examples/sr_trend_v6.pine).
+### Built-in default: EMA Rejections / Good for Scalpers
+The extension comes with **EMA Rejections** (the "EMA Confirmation Break" indicator by Zuage337) switched on, plus a
+matching **signal guide** chart note:
+- **Green arrow** (below the bar): a strong move to the upside has begun.
+- **Orange arrow** (above the bar): a strong move to the downside has begun.
+- **Blue / red ✕**: a failed break. A cross **above** the bar means pressure downwards; **below** means pressure upwards.
+
+![EMA Rejections on a chart](docs/images/ema-rejections.png)
+
+Change the EMA length (default 5) with ⚙ → Inputs. Source: [`examples/ema_rejections.pine`](examples/ema_rejections.pine).
+
+An example strategy is also included in [`examples/sr_trend_v6.pine`](examples/sr_trend_v6.pine).
 
 ---
 
@@ -248,6 +259,8 @@ icons/, docs/          Icons and screenshots
 ## Credits & license
 
 - Pine Script engine: [PineTS](https://github.com/LuxAlgo/PineTS) by LuxAlgo, licensed AGPL-3.0.
+- Default indicator "EMA Confirmation Break" © Zuage337, licensed under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/)
+  (`examples/ema_rejections.pine`, also bundled in `store.js`).
 - This extension is also licensed under **AGPL-3.0** (see [LICENSE](LICENSE)). You can use, modify and share it. If you
   distribute a modified version, you must share its source code under the same license.
 - Not affiliated with Tradara, TradingView or LuxAlgo. Pine Script® is a trademark of TradingView, Inc.

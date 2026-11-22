@@ -51,7 +51,7 @@ hline(30, "Oversold", color=color.green)
 };
 
 const EXAMPLE_NOTE = {
-  title: 'Signal guide',
+  title: 'EMA Rejections: signal guide',
   text: `There are 4 different signals this indicator can print:
 
 1. A **green arrow** indicates a move of strength to the upside has begun. Could be a bull trap or the start of a long lasting bullish move.
@@ -77,13 +77,33 @@ async function loadNotes() {
 }
 async function saveNotes(notes) { await chrome.storage.local.set({ notes }); }
 
-async function loadAll() {
-  const d = await chrome.storage.local.get(['settings', 'scripts', 'status']);
-  let scripts = d.scripts;
-  if (!Array.isArray(scripts)) {
-    scripts = [{ id: crypto.randomUUID(), name: 'EMA Cross Strategy (example)', code: TEMPLATES.strategy, enabled: false }];
-    await chrome.storage.local.set({ scripts });
+// Built-in default indicator (MPL-2.0, © Zuage337)
+const DEFAULT_INDICATOR = {
+  name: 'EMA Rejections / Good for Scalpers',
+  code: "// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/\n// \u00a9 Zuage337\n\n//@version=5\n\nint val = na\nbool holdingAbove = na\nbool holdingBelow = na\nbool holdingAboveEMA = na\nbool holdingBelowEMA = na\n\nindicator(\"EMA Confirmation Break\", timeframe=\"\", overlay = true)\n\nx = input.int(5, minval = 1, title=\"EMA\")\nxEMA = ta.ema(close, x)\n\nbuy = ta.crossunder(xEMA[1], close[1])\nsell = ta.crossover(xEMA[1], close[1])\n\nif (buy)\n    if ((close > close[1]) and (high > high[1]))\n        val := 1\n    else if (high <= high[1] or (close < xEMA))\n        holdingAbove := true\n        if (close >= xEMA)\n            holdingAboveEMA := true\n        \nelse if (sell)\n    if ((close < close[1]) and (low < low[1]))\n        val := -1\n    else if (low >= low[1] or (close > xEMA))\n        holdingBelow := true\n        if (close <= xEMA)\n            holdingBelowEMA := true\n\n\n//crosses to indicate failed break. Blue = more bullish, Red = more bearish.\nplotshape(holdingAbove, style=shape.xcross, color=holdingAboveEMA ? color.blue : color.red , location=location.abovebar)\nplotshape(holdingBelow, style=shape.xcross, color=holdingBelowEMA ? color.red : color.blue, location=location.belowbar)\n//plots arrows to indicate buy/sell.\nplotarrow(val, title = \"ARROW\", colorup = color.green, colordown = color.orange, minheight = 35, maxheight = 35)\n",
+};
+
+// One-time additions for existing installs. Bump DEFAULTS_VERSION to ship a new default.
+const DEFAULTS_VERSION = 2;
+async function ensureDefaults() {
+  const d = await chrome.storage.local.get(['scripts', 'defaultsVersion']);
+  if ((d.defaultsVersion || 0) >= DEFAULTS_VERSION) return;
+  let scripts = Array.isArray(d.scripts) ? d.scripts : null;
+  if (!scripts) {
+    scripts = [
+      { id: crypto.randomUUID(), name: DEFAULT_INDICATOR.name, code: DEFAULT_INDICATOR.code, enabled: true },
+      { id: crypto.randomUUID(), name: 'EMA Cross Strategy (example)', code: TEMPLATES.strategy, enabled: false },
+    ];
+  } else if (!scripts.some((s) => s.name === DEFAULT_INDICATOR.name || /EMA Confirmation Break/.test(s.code || ''))) {
+    scripts.unshift({ id: crypto.randomUUID(), name: DEFAULT_INDICATOR.name, code: DEFAULT_INDICATOR.code, enabled: true });
   }
+  await chrome.storage.local.set({ scripts, defaultsVersion: DEFAULTS_VERSION });
+}
+
+async function loadAll() {
+  await ensureDefaults();
+  const d = await chrome.storage.local.get(['settings', 'scripts', 'status']);
+  const scripts = Array.isArray(d.scripts) ? d.scripts : [];
   return { settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) }, scripts, status: d.status || {} };
 }
 

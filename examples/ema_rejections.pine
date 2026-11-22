@@ -1,0 +1,41 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Zuage337
+
+//@version=5
+
+int val = na
+bool holdingAbove = na
+bool holdingBelow = na
+bool holdingAboveEMA = na
+bool holdingBelowEMA = na
+
+indicator("EMA Confirmation Break", timeframe="", overlay = true)
+
+x = input.int(5, minval = 1, title="EMA")
+xEMA = ta.ema(close, x)
+
+buy = ta.crossunder(xEMA[1], close[1])
+sell = ta.crossover(xEMA[1], close[1])
+
+if (buy)
+    if ((close > close[1]) and (high > high[1]))
+        val := 1
+    else if (high <= high[1] or (close < xEMA))
+        holdingAbove := true
+        if (close >= xEMA)
+            holdingAboveEMA := true
+        
+else if (sell)
+    if ((close < close[1]) and (low < low[1]))
+        val := -1
+    else if (low >= low[1] or (close > xEMA))
+        holdingBelow := true
+        if (close <= xEMA)
+            holdingBelowEMA := true
+
+
+//crosses to indicate failed break. Blue = more bullish, Red = more bearish.
+plotshape(holdingAbove, style=shape.xcross, color=holdingAboveEMA ? color.blue : color.red , location=location.abovebar)
+plotshape(holdingBelow, style=shape.xcross, color=holdingBelowEMA ? color.red : color.blue, location=location.belowbar)
+//plots arrows to indicate buy/sell.
+plotarrow(val, title = "ARROW", colorup = color.green, colordown = color.orange, minheight = 35, maxheight = 35)

@@ -237,6 +237,7 @@
   }
 
   async function load() {
+    if (typeof ensureDefaults === 'function') { try { await ensureDefaults(); } catch (_) {} }
     const data = await chrome.storage.local.get(['settings', 'scripts', 'notes']);
     notes = Array.isArray(data.notes) ? data.notes : (typeof loadNotes === 'function' ? await loadNotes() : []);
     settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };

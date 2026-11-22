@@ -353,7 +353,7 @@
         // autoscale over visible values
         let mn = Infinity, mx = -Infinity;
         for (const pl of p.plots) {
-          if (pl.style === 'fill' || pl.style === 'background' || pl.style === 'shape' || pl.style === 'char' || pl.style === 'barcolor') continue;
+          if (pl.style === 'fill' || pl.style === 'background' || pl.style === 'shape' || pl.style === 'char' || pl.style === 'barcolor' || pl.style === 'arrow') continue;
           if (pl.style === 'hline') { const v = lastVal(pl.values); if (isNum(v)) { mn = Math.min(mn, v); mx = Math.max(mx, v); } continue; }
           for (let i = iFrom; i <= iTo; i++) { const v = pl.values[i]; if (isNum(v)) { if (v < mn) mn = v; if (v > mx) mx = v; } }
           if (/histogram|columns/.test(pl.style)) { mn = Math.min(mn, 0); mx = Math.max(mx, 0); }
@@ -455,6 +455,34 @@
         const y = Math.round(yOf(v)) + 0.5; g.beginPath(); g.moveTo(PX0, y); g.lineTo(PX1, y); g.stroke(); g.setLineDash([]);
         continue;
       }
+      if (st === 'arrow') {
+        // plotarrow(): up arrows below the bar for positive values, down arrows above for negative
+        let maxAbs = 0;
+        for (let i = iFrom; i <= iTo; i++) { const v = pl.values[i]; if (isNum(v)) maxAbs = Math.max(maxAbs, Math.abs(v)); }
+        const hMin = pl.minheight || 5, hMax = pl.maxheight || 100;
+        for (let i = iFrom; i <= iTo; i++) {
+          const v = pl.values[i];
+          if (!isNum(v) || v === 0) continue;
+          const colr = colorAt(pl, i); if (!colr) continue;
+          const bar = bars[off + i]; const x = X(off + i); if (!bar || !isNum(x)) continue;
+          const up = v > 0;
+          const h = Math.min(hMax, Math.max(hMin, maxAbs ? hMin + (hMax - hMin) * Math.abs(v) / maxAbs : hMax)) * 0.8;
+          const anchor = up ? (c.overlay ? c.yOf(bar.low) + 4 : bottom - 2) : (c.overlay ? c.yOf(bar.high) - 4 : top + 2);
+          const headW = Math.max(5, Math.min(12, bs * 0.9)), headH = Math.min(h * 0.45, headW * 1.1);
+          const shaftW = Math.max(1.5, headW * 0.32);
+          const dir = up ? 1 : -1; // 1: tip at anchor, body extends downward
+          g.fillStyle = colr; g.beginPath();
+          g.moveTo(x, anchor);
+          g.lineTo(x + headW / 2, anchor + dir * headH);
+          g.lineTo(x + shaftW / 2, anchor + dir * headH);
+          g.lineTo(x + shaftW / 2, anchor + dir * h);
+          g.lineTo(x - shaftW / 2, anchor + dir * h);
+          g.lineTo(x - shaftW / 2, anchor + dir * headH);
+          g.lineTo(x - headW / 2, anchor + dir * headH);
+          g.closePath(); g.fill();
+        }
+        continue;
+      }
       if (st === 'shape' || st === 'char') {
         const size = SIZE_PX[pl.size] || (st === 'char' ? 12 : 10);
         for (let i = iFrom; i <= iTo; i++) {
@@ -462,7 +490,7 @@
           if (v === null || v === 0) continue;
           const col = colorAt(pl, i) || '#2962FF';
           const bar = bars[off + i]; const x = X(off + i); if (!bar || !isNum(x)) continue;
-          const loc = (pl.location || 'AboveBar').toLowerCase();
+          const loc = ((pl.locs && pl.locs[i]) || pl.location || 'AboveBar').toLowerCase();
           let y; let below = false;
           if (loc === 'abovebar') y = (c.overlay ? c.yOf(bar.high) : top + 14) - size / 2 - 4;
           else if (loc === 'belowbar') { y = (c.overlay ? c.yOf(bar.low) : bottom - 14) + size / 2 + 4; below = true; }
@@ -474,7 +502,7 @@
           if (st === 'char') {
             g.fillStyle = col; g.font = `${size}px -apple-system, Segoe UI, Roboto, sans-serif`;
             g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(pl.char || '★', x, y);
-          } else drawShape(g, pl.shape || 'shape_xcross', x, y, size, col);
+          } else drawShape(g, (pl.shapes && pl.shapes[i]) || pl.shape || 'shape_xcross', x, y, size, col);
           if (pl.text) {
             g.fillStyle = pl.textcolor || col; g.font = '10px -apple-system, Segoe UI, Roboto, sans-serif'; g.textAlign = 'center';
             g.textBaseline = below ? 'top' : 'bottom';

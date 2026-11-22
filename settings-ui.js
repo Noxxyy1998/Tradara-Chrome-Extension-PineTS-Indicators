@@ -328,7 +328,7 @@
       for (const p of plots) {
         const ps = st.style.plots[p.title] || {};
         const upd = (k, v) => { st.style.plots[p.title] = { ...(st.style.plots[p.title] || {}), [k]: v }; commit(); };
-        const lineLike = !/shape|char|background|barcolor|fill|histogram|columns/.test(p.style);
+        const lineLike = !/shape|char|arrow|background|barcolor|fill|histogram|columns/.test(p.style);
         out.push(el('div', { class: 'plot' },
           el('input', { type: 'checkbox', checked: ps.visible !== false, onchange: (e) => upd('visible', e.target.checked) }),
           el('span', {}, friendlyPlotName(p)),
