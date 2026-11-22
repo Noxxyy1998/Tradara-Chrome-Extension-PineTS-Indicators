@@ -114,3 +114,48 @@ function nameFromCode(code, fallback) {
   const m = code.match(/^\s*(?:indicator|strategy|study)\s*\(\s*(?:title\s*=\s*)?["']([^"']+)["']/m);
   return (m && m[1]) || fallback;
 }
+
+
+// ---------- natural-sounding voice ----------
+// Chrome's built-in extension voice can sound robotic. Web voices like "Google US English" or Windows
+// "Natural" voices sound much closer to Siri, so prefer those and pick the most natural one automatically.
+const PTOVoice = (() => {
+  const RANK = [/natural|neural/i, /siri/i, /premium|enhanced/i, /^google us english/i, /^google uk english female/i,
+    /online/i, /samantha|ava|allison|aria|jenny|zira|susan/i, /^google/i];
+  let cache = [];
+  const load = () => { try { cache = window.speechSynthesis ? window.speechSynthesis.getVoices() : []; } catch (_) { cache = []; } return cache; };
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    load();
+    try { window.speechSynthesis.addEventListener('voiceschanged', load); } catch (_) {}
+  }
+  function list() { return cache.length ? cache : load(); }
+  function best() {
+    const v = list();
+    const en = v.filter((x) => /^en[-_]/i.test(x.lang || ''));
+    const pool = en.length ? en : v;
+    for (const re of RANK) {
+      const hit = pool.find((x) => re.test(x.name) && /en[-_]US/i.test(x.lang || '')) || pool.find((x) => re.test(x.name));
+      if (hit) return hit;
+    }
+    return pool[0] || null;
+  }
+  function find(name) { return !name || name === 'auto' ? best() : (list().find((x) => x.name === name) || best()); }
+  // Chrome only lets a page speak after the user has clicked or typed on it once
+  function canSpeakHere() {
+    try { return !!window.speechSynthesis && (!navigator.userActivation || navigator.userActivation.hasBeenActive) && list().length > 0; }
+    catch (_) { return false; }
+  }
+  function speak(text, a = {}) {
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = find(a.voiceName);
+      if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = Math.max(0.5, Math.min(2, Number(a.rate) || 1));
+      u.pitch = 1;
+      u.volume = Math.max(0, Math.min(1, a.volume === undefined ? 1 : Number(a.volume)));
+      window.speechSynthesis.speak(u);
+      return true;
+    } catch (_) { return false; }
+  }
+  return { list, best, find, speak, canSpeakHere };
+})();

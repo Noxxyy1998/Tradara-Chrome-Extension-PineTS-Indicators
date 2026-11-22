@@ -5,6 +5,11 @@
 (() => {
   if (window.PTOSettings) return;
 
+  const OLD_BULL = '{symbol} {tf}: green arrow, RSI {rsi}. Bullish move.';
+  const OLD_BEAR = '{symbol} {tf}: orange arrow, RSI {rsi}. Bearish move.';
+  const NEW_BULL = 'Heads up. Green arrow on {symbol}, {tf} chart. RSI is {rsi}. Looking bullish.';
+  const NEW_BEAR = 'Heads up. Orange arrow on {symbol}, {tf} chart. RSI is {rsi}. Looking bearish.';
+
   const DEFAULT_SCRIPT_SETTINGS = () => ({
     hidden: false,
     inputs: {},
@@ -21,11 +26,10 @@
       showInPanel: true,
     },
     alerts: {
-      enabled: true, voice: true, notify: true, showTags: true,
-      rsiLength: 14, rsiLevel: 50,
-      voiceName: '', rate: 1, volume: 1,
-      bullText: '{symbol} {tf}: green arrow, RSI {rsi}. Bullish move.',
-      bearText: '{symbol} {tf}: orange arrow, RSI {rsi}. Bearish move.',
+      enabled: true, voice: true, notify: true, rsiTags: false,
+      rsiLength: 14, rsiLevel: 50, tfs: ['chart'],
+      voiceName: 'auto', systemVoiceName: '', rate: 1, volume: 1,
+      bullText: NEW_BULL, bearText: NEW_BEAR,
     },
     visibility: {
       seconds: { on: true, min: 1, max: 59 }, minutes: { on: true, min: 1, max: 59 }, hours: { on: true, min: 1, max: 24 },
@@ -40,7 +44,16 @@
     for (const [k, v] of Object.entries(over)) out[k] = isObj(v) && isObj(base[k]) ? deepMerge(base[k], v) : v;
     return out;
   }
-  function merge(s) { return deepMerge(DEFAULT_SCRIPT_SETTINGS(), s || {}); }
+  function merge(s) {
+    const m = deepMerge(DEFAULT_SCRIPT_SETTINGS(), s || {});
+    // upgrade settings saved by older versions
+    if (m.alerts.bullText === OLD_BULL) m.alerts.bullText = NEW_BULL;
+    if (m.alerts.bearText === OLD_BEAR) m.alerts.bearText = NEW_BEAR;
+    if (!m.alerts.voiceName) m.alerts.voiceName = 'auto';
+    if (!Array.isArray(m.alerts.tfs) || !m.alerts.tfs.length) m.alerts.tfs = ['chart'];
+    delete m.alerts.showTags;
+    return m;
+  }
 
   const CSS = `
     :host { all: initial; }
@@ -83,6 +96,9 @@
     .pop button { display: block; width: 100%; text-align: left; background: none; border: 0; color: #d1d4dc; padding: 8px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
     .pop button:hover { background: #33333d; }
     .empty { color: #787b86; padding: 20px 0; text-align: center; }
+    .tfgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0 8px; }
+    .chk.tf { margin: 6px 0; }
+    .row.full { grid-template-columns: 1fr; gap: 4px; }
   `;
 
   const SOURCES = ['open', 'high', 'low', 'close', 'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'volume'];
@@ -223,50 +239,69 @@
     }
 
     // ---- Alerts (EMA Rejections voice notifications)
-    let voices = null;
+    const ALERT_TFS = [['chart', 'Chart'], [60000, '1m'], [120000, '2m'], [180000, '3m'], [300000, '5m'], [600000, '10m'], [900000, '15m'],
+      [1800000, '30m'], [2700000, '45m'], [3600000, '1h'], [7200000, '2h'], [10800000, '3h'], [14400000, '4h']];
     function renderAlerts() {
       const a = st.alerts;
       const upd = (k, v) => { st.alerts = { ...st.alerts, [k]: v }; commit(); };
-      const voiceSel = el('select', { onchange: (e) => upd('voiceName', e.target.value) }, el('option', { value: '' }, 'Default voice'));
+      const hasVoiceApi = typeof PTOVoice !== 'undefined';
+      const voiceSel = el('select', { onchange: (e) => upd('voiceName', e.target.value) });
       const fillVoices = () => {
-        for (const v of voices || []) voiceSel.append(el('option', { value: v.name, selected: v.name === a.voiceName ? true : null }, v.lang ? `${v.name} (${v.lang})` : v.name));
+        const list = hasVoiceApi ? PTOVoice.list() : [];
+        const best = hasVoiceApi ? PTOVoice.best() : null;
+        const en = list.filter((v) => /^en/i.test(v.lang || ''));
+        const rest = list.filter((v) => !/^en/i.test(v.lang || ''));
+        voiceSel.replaceChildren(
+          el('option', { value: 'auto', selected: a.voiceName === 'auto' ? true : null }, `Auto: most natural${best ? ` (${best.name})` : ''}`),
+          ...[...en, ...rest].map((v) => el('option', { value: v.name, selected: v.name === a.voiceName ? true : null }, `${v.name}${v.lang ? ` (${v.lang})` : ''}`)));
       };
-      if (voices) fillVoices();
-      else {
-        try { chrome.runtime.sendMessage({ type: 'pto-voices' }, (list) => { void chrome.runtime.lastError; voices = Array.isArray(list) ? list : []; fillVoices(); }); } catch (_) { voices = []; }
-      }
+      fillVoices();
+      if (hasVoiceApi && !PTOVoice.list().length) setTimeout(fillVoices, 400);
+      const sample = (dir) => String(dir > 0 ? a.bullText : a.bearText)
+        .replace(/\{symbol\}/gi, 'NQ').replace(/\{tf\}/gi, '5 minute').replace(/\{rsi\}/gi, dir > 0 ? '42' : '61').replace(/\{price\}/gi, '');
       const test = (dir) => {
-        const sample = { rsi: dir > 0 ? 42 : 61, price: 0 };
-        const tpl = dir > 0 ? a.bullText : a.bearText;
-        const text = String(tpl).replace(/\{symbol\}/gi, 'NQ').replace(/\{tf\}/gi, '1 minute').replace(/\{rsi\}/gi, String(sample.rsi)).replace(/\{price\}/gi, '');
-        try { chrome.runtime.sendMessage({ type: 'pto-alert', text, title: dir > 0 ? '▲ Green arrow (test)' : '▼ Orange arrow (test)', speak: true, notify: !!a.notify, voiceName: a.voiceName, rate: a.rate, volume: a.volume }, () => void chrome.runtime.lastError); } catch (_) {}
+        const text = sample(dir);
+        let spoken = false;
+        if (hasVoiceApi) { try { window.speechSynthesis.cancel(); } catch (_) {} spoken = PTOVoice.speak(text, a); }
+        try { chrome.runtime.sendMessage({ type: 'pto-alert', text, title: dir > 0 ? '▲ Green arrow (test)' : '▼ Orange arrow (test)', speak: !spoken, notify: !!a.notify, voiceName: a.systemVoiceName, rate: a.rate, volume: a.volume }, () => void chrome.runtime.lastError); } catch (_) {}
+      };
+      const tfSet = new Set((a.tfs || ['chart']).map(String));
+      const toggleTf = (v, on) => {
+        const next = new Set(tfSet); if (on) next.add(String(v)); else next.delete(String(v));
+        upd('tfs', [...next].map((x) => (x === 'chart' ? 'chart' : Number(x))));
+        render();
       };
       return [
-        el('div', { class: 'hint' }, `Calls out when a green arrow prints with RSI below ${a.rsiLevel}, or an orange arrow prints with RSI above ${a.rsiLevel}. Checked when the bar closes, once per signal. The Tradara tab must stay open (it can be in the background).`),
+        el('div', { class: 'hint' }, `Calls out when a green arrow prints with RSI below ${a.rsiLevel}, or an orange arrow prints with RSI above ${a.rsiLevel}, once per signal, when the candle closes. Keep the Tradara tab open (it can be in the background).`),
         el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.enabled, onchange: (e) => upd('enabled', e.target.checked) }), 'Alerts on'),
+        el('div', { class: 'sec' }, 'Alert timeframes'),
+        el('div', { class: 'tfgrid' }, ALERT_TFS.map(([v, label]) =>
+          el('label', { class: 'chk tf' }, el('input', { type: 'checkbox', checked: tfSet.has(String(v)), onchange: (e) => toggleTf(v, e.target.checked) }), label))),
+        el('div', { class: 'hint' }, '"Chart" follows whatever timeframe the chart is on. Other timeframes are built from the chart\'s candles, so the chart must be on that timeframe or lower (e.g. a 1m chart can alert on 1m, 5m and 15m together). 4h needs more history: raise Max bars to about 20000.'),
         el('div', { class: 'sec' }, 'Rule'),
         el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'RSI length'),
           el('input', { type: 'number', min: 2, max: 200, step: 1, value: a.rsiLength, onchange: (e) => upd('rsiLength', Math.max(2, Math.round(Number(e.target.value) || 14))) })),
         el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'RSI level'),
           el('input', { type: 'number', min: 1, max: 99, step: 1, value: a.rsiLevel, onchange: (e) => upd('rsiLevel', Math.max(1, Math.min(99, Number(e.target.value) || 50))) })),
-        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.showTags, onchange: (e) => upd('showTags', e.target.checked) }), 'Show RSI tag on arrows that meet the rule'),
+        el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: !!a.rsiTags, onchange: (e) => upd('rsiTags', e.target.checked) }), 'Show an RSI label on arrows that meet the rule'),
         el('div', { class: 'sec' }, 'How to notify'),
         el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.voice, onchange: (e) => upd('voice', e.target.checked) }), 'Voice call-out'),
         el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: a.notify, onchange: (e) => upd('notify', e.target.checked) }), 'Pop-up notification'),
         el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Voice'), voiceSel),
+        el('div', { class: 'hint' }, 'The most natural voices are usually "Google US English" or ones marked "Natural" or "Online". Click anywhere on the Tradara page once after opening it so Chrome allows the natural voice.'),
         el('div', { class: 'row' }, el('label', { class: 'lbl' }, `Speed (${a.rate}×)`),
-          el('input', { type: 'range', min: 0.5, max: 2, step: 0.1, value: a.rate, onchange: (e) => { upd('rate', Number(e.target.value)); render(); } })),
+          el('input', { type: 'range', min: 0.5, max: 2, step: 0.05, value: a.rate, onchange: (e) => { upd('rate', Number(e.target.value)); render(); } })),
         el('div', { class: 'row' }, el('label', { class: 'lbl' }, `Volume (${Math.round(a.volume * 100)}%)`),
           el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: a.volume, onchange: (e) => { upd('volume', Number(e.target.value)); render(); } })),
-        el('div', { class: 'sec' }, 'What it says'),
-        el('div', { class: 'hint' }, 'Placeholders: {symbol} {tf} {rsi} {price}'),
-        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Green arrow'),
-          el('input', { type: 'text', value: a.bullText, onchange: (e) => upd('bullText', e.target.value) })),
-        el('div', { class: 'row' }, el('label', { class: 'lbl' }, 'Orange arrow'),
-          el('input', { type: 'text', value: a.bearText, onchange: (e) => upd('bearText', e.target.value) })),
-        el('div', { class: 'ctl', style: 'margin-top:12px' },
+        el('div', { class: 'ctl', style: 'margin-top:8px' },
           el('button', { class: 'btn', onclick: () => test(1) }, '▶ Test green'),
           el('button', { class: 'btn', onclick: () => test(-1) }, '▶ Test orange')),
+        el('div', { class: 'sec' }, 'What it says'),
+        el('div', { class: 'hint' }, 'Placeholders: {symbol} {tf} {rsi} {price}. Commas and periods add natural pauses.'),
+        el('div', { class: 'row full' }, el('label', { class: 'lbl' }, 'Green arrow'),
+          el('input', { type: 'text', value: a.bullText, onchange: (e) => upd('bullText', e.target.value) })),
+        el('div', { class: 'row full' }, el('label', { class: 'lbl' }, 'Orange arrow'),
+          el('input', { type: 'text', value: a.bearText, onchange: (e) => upd('bearText', e.target.value) })),
       ];
     }
 

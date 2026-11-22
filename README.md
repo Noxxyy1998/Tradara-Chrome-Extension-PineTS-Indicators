@@ -80,15 +80,21 @@ Change the EMA length (default 5) with ⚙ → Inputs.
 
 #### Voice alerts (EMA Rejections)
 The extension calls out loud, and can also show a desktop notification, when a signal meets the RSI rule:
-- **Green arrow** with **RSI below 50**: *"NQ 1 minute: green arrow, RSI 42. Bullish move."*
-- **Orange arrow** with **RSI above 50**: *"NQ 1 minute: orange arrow, RSI 61. Bearish move."*
+- **Green arrow** with **RSI below 50**: *"Heads up. Green arrow on NQ, 5 minute chart. RSI is 42. Looking bullish."*
+- **Orange arrow** with **RSI above 50**: *"Heads up. Orange arrow on NQ, 5 minute chart. RSI is 61. Looking bearish."*
 
-Arrows that don't meet the rule stay silent. Qualifying arrows get a small **RSI** tag on the chart.
-- Checked **when the bar closes**, once per signal. History is never read out when you open or refresh the page.
+Arrows that don't meet the rule stay silent.
+- **Pick your alert timeframes** (1m, 2m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 4h, or "Chart"). Higher timeframes are built
+  from the chart's candles, so one 1-minute chart can alert on 1m, 5m and 15m at the same time. The chart must be on that
+  timeframe or lower. 4h needs more history: raise **Max bars** to about 20000.
+- Checked **when the candle closes**, once per signal. History is never read out when you open or refresh the page.
+- **Natural voice**: automatically uses the most natural voice on your computer (e.g. "Google US English" or Windows
+  "Natural" voices) instead of the robotic default. Click once anywhere on the Tradara page after opening it so Chrome allows
+  it.
 - Works with Tradara in a **background tab**, but the tab must stay open.
 - **🔔** in the chart legend mutes or unmutes the alerts.
-- **⚙ → Alerts**: turn alerts on or off, set RSI length (14) and level (50), choose voice, speed, volume, notification
-  on/off, and what it says (`{symbol}` `{tf}` `{rsi}` `{price}`), with **Test** buttons.
+- **⚙ → Alerts**: alerts on/off, timeframes, RSI length (14) and level (50), optional RSI label on qualifying arrows, voice,
+  speed, volume, notification on/off, and what it says (`{symbol}` `{tf}` `{rsi}` `{price}`), with **Test** buttons.
 
 <img src="docs/images/settings-alerts.png" width="320" alt="Alerts settings"> Source: [`examples/ema_rejections.pine`](examples/ema_rejections.pine).
 

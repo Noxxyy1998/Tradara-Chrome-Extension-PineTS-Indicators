@@ -398,7 +398,7 @@
       renderDrawings(ctx, p);
       if (p.strategy && config.settings.showTrades !== false) renderTrades(ctx, p, Y);
       const al = o.s.settings && o.s.settings.alerts;
-      if (Array.isArray(p.alertSignals) && (!al || al.showTags !== false)) renderAlertTags(ctx, p);
+      if (Array.isArray(p.alertSignals) && al && al.rsiTags) renderAlertTags(ctx, p);
     }
     g.restore();
 
@@ -839,7 +839,13 @@
       const bellOn = canAlert && al.enabled !== false && (al.voice || al.notify);
       if (canAlert && !hidden && !tfOff && al.enabled !== false) {
         const lvl = al.rsiLevel ?? 50;
-        lines.push({ t: `${bellOn ? '🔔' : '🔕'} Green < RSI ${lvl} · Orange > RSI ${lvl}`, c: bellOn ? '#d1d4dc' : '#787b86' });
+        const tfName = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : ms < 3600000 ? `${Math.round(ms / 60000)}m` : `${Math.round(ms / 3600000)}h`);
+        const tfs = (p.alertTfs || []).filter((x) => !x.unsupported && !x.tooShort).map((x) => tfName(x.ms));
+        lines.push({ t: `${bellOn ? '🔔' : '🔕'} Alerts ${tfs.length ? tfs.join(' · ') : '–'}  (RSI ${lvl})`, c: bellOn ? '#d1d4dc' : '#787b86' });
+        for (const x of p.alertTfs || []) {
+          if (x.unsupported) lines.push({ t: `${tfName(x.ms)} alerts need the chart on ${tfName(x.ms)} or lower`, c: '#e0a800' });
+          else if (x.tooShort) lines.push({ t: `${tfName(x.ms)} alerts need more history (raise Max bars)`, c: '#e0a800' });
+        }
       }
       items.push({ id: s.id, title, hidden, off: hidden || tfOff, lines, canAlert, bellOn });
     }

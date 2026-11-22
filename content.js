@@ -41,7 +41,7 @@
       scripts: scripts.map(({ id, name, enabled, settings: ss }) => {
         const m = mergeSettings(ss);
         return { id, name, enabled, settings: { hidden: m.hidden, style: m.style, visibility: m.visibility, maxTradesPerDay: m.maxTradesPerDay,
-          alerts: { enabled: m.alerts.enabled, voice: m.alerts.voice, notify: m.alerts.notify, showTags: m.alerts.showTags, rsiLevel: m.alerts.rsiLevel } } };
+          alerts: { enabled: m.alerts.enabled, voice: m.alerts.voice, notify: m.alerts.notify, rsiTags: m.alerts.rsiTags, rsiLevel: m.alerts.rsiLevel, tfs: m.alerts.tfs } } };
       }),
     });
   }
@@ -109,23 +109,34 @@
   function handleAlerts(scriptId, chartKey, payload) {
     const s = scripts.find((x) => x.id === scriptId);
     const b = lastBars.get(chartKey);
-    if (!s || !b) return;
+    if (!s || !b || !Array.isArray(payload.alertTfs)) return;
     const a = mergeSettings(s.settings).alerts;
-    const key = `${scriptId}|${chartKey}|${b.symbol}|${b.tfMs}|${a.rsiLength}|${a.rsiLevel}`;
-    const closed = payload.alertSignals.filter((x) => !x.forming);
-    const newest = closed.length ? closed[closed.length - 1].t : 0;
-    if (!alertSeen.has(key)) { alertSeen.set(key, newest); return; } // first look: signals already on the chart are history
-    const seen = alertSeen.get(key);
-    const fresh = closed.filter((x) => x.t > seen && x.i >= payload.n - 3); // only signals on the last couple of closed bars
-    alertSeen.set(key, Math.max(seen, newest));
-    if (!fresh.length || !a.enabled || (!a.voice && !a.notify)) return;
-    const x = fresh[fresh.length - 1];
-    const text = fill(x.dir > 0 ? a.bullText : a.bearText, x, b, a.rsiLevel);
+    for (const tf of payload.alertTfs) {
+      if (!tf || !Array.isArray(tf.signals) || tf.unsupported || tf.tooShort) continue;
+      const key = `${scriptId}|${chartKey}|${b.symbol}|${tf.ms}|${a.rsiLength}|${a.rsiLevel}`;
+      const closed = tf.signals.filter((x) => !x.forming);
+      const newest = closed.length ? closed[closed.length - 1].t : 0;
+      if (!alertSeen.has(key)) { alertSeen.set(key, newest); continue; } // first look: signals already there are history
+      const seen = alertSeen.get(key);
+      const fresh = closed.filter((x) => x.t > seen && x.i >= tf.n - 3); // only the last couple of closed candles
+      alertSeen.set(key, Math.max(seen, newest));
+      if (!fresh.length || !a.enabled || (!a.voice && !a.notify)) continue;
+      const x = fresh[fresh.length - 1];
+      const bt = { symbol: b.symbol, tfMs: tf.ms };
+      const text = fill(x.dir > 0 ? a.bullText : a.bearText, x, bt, a.rsiLevel);
+      sayAlert(text, `${x.dir > 0 ? '▲ Green arrow' : '▼ Orange arrow'}: ${String(b.symbol).replace(/^\//, '')} ${tfWords(tf.ms)} · RSI ${rsiText(x.rsi, a.rsiLevel)}`, a);
+    }
+  }
+
+  // Speak with the browser's most natural voice when Chrome allows it (after you've clicked on the page once);
+  // otherwise use the extension's built-in voice. The pop-up notification always goes through the extension.
+  function sayAlert(text, title, a) {
+    let spoken = false;
+    if (a.voice && typeof PTOVoice !== 'undefined' && PTOVoice.canSpeakHere()) spoken = PTOVoice.speak(text, a);
     try {
       chrome.runtime.sendMessage({
-        type: 'pto-alert', text, speak: !!a.voice, notify: !!a.notify,
-        title: `${x.dir > 0 ? '▲ Green arrow' : '▼ Orange arrow'}: ${String(b.symbol).replace(/^\//, '')} ${tfWords(b.tfMs)}`,
-        voiceName: a.voiceName, rate: a.rate, volume: a.volume,
+        type: 'pto-alert', text, title, speak: !!a.voice && !spoken, notify: !!a.notify,
+        voiceName: a.systemVoiceName || '', rate: a.rate, volume: a.volume,
       }, () => void chrome.runtime.lastError);
     } catch (_) { /* extension reloaded */ }
   }
@@ -219,7 +230,10 @@
         bars, symbol: b.symbol, tf: b.tf, tfMs: b.tfMs,
         pointValueOverride: Number(settings.pointValue) || 0,
         settings: { inputs: ss.inputs, props: ss.props, maxTradesPerDay: ss.maxTradesPerDay, dayReset: ss.dayReset },
-        alerts: { rsiLength: ss.alerts.rsiLength, rsiLevel: ss.alerts.rsiLevel },
+        alerts: {
+          enabled: !!ss.alerts.enabled, rsiLength: ss.alerts.rsiLength, rsiLevel: ss.alerts.rsiLevel,
+          tfs: (ss.alerts.tfs || ['chart']).map((x) => (x === 'chart' ? b.tfMs : Number(x))).filter((x) => x > 0),
+        },
         lastBarForming: !!b.lastBarForming,
       });
     }

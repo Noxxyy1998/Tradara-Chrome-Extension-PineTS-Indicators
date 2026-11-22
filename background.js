@@ -4,14 +4,29 @@
 
 const notifTabs = new Map(); // notification id -> tab id (click to jump back to the chart)
 
+// Prefer the most natural-sounding installed voice when none is chosen
+const RANK = [/natural|neural/i, /siri/i, /premium|enhanced/i, /^google us english/i, /^google uk english female/i,
+  /online/i, /samantha|ava|allison|aria|jenny|zira|susan/i, /^google/i];
+let bestVoice;
+function pickBest(cb) {
+  if (bestVoice !== undefined) return cb(bestVoice);
+  chrome.tts.getVoices((voices) => {
+    const en = (voices || []).filter((v) => /^en/i.test(v.lang || ''));
+    bestVoice = null;
+    for (const re of RANK) { const hit = en.find((v) => re.test(v.voiceName || '')); if (hit) { bestVoice = hit.voiceName; break; } }
+    cb(bestVoice);
+  });
+}
+
 function speak(text, opts = {}) {
   if (!text) return;
-  chrome.tts.speak(text, {
+  const go = (voiceName) => chrome.tts.speak(text, {
     enqueue: true,
-    voiceName: opts.voiceName || undefined,
+    voiceName: voiceName || undefined,
     rate: Math.max(0.5, Math.min(2, Number(opts.rate) || 1)),
     volume: Math.max(0, Math.min(1, opts.volume === undefined ? 1 : Number(opts.volume))),
   });
+  if (opts.voiceName) go(opts.voiceName); else pickBest(go);
 }
 
 chrome.runtime.onMessage.addListener((m, sender, reply) => {

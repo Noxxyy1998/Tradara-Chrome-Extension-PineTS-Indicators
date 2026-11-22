@@ -198,18 +198,99 @@ function rsiSeries(bars, len) {
 function alertSignals(m, bars, plots) {
   const arrow = plots.find((p) => p.style === 'arrow');
   if (!arrow || !/EMA Confirmation Break/.test(m.script.code || '')) return undefined;
-  const a = m.alerts || {};
+  return qualifying(arrow.values, bars, m.alerts || {}, m.lastBarForming);
+}
+
+// ---------- multi-timeframe alerts ----------
+// Build higher-timeframe candles from the chart's candles. Minute timeframes line up with the clock;
+// hour timeframes line up with the 6 PM ET futures session open (like TradingView's CME bars).
+const etFmtMin = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' });
+const etOffCache = new Map();
+function etOffset(t) { // ms to add to UTC to get New York wall-clock time
+  const h = Math.floor(t / 3600000);
+  if (etOffCache.has(h)) return etOffCache.get(h);
+  const p = Object.fromEntries(etFmtMin.formatToParts(new Date(h * 3600000)).map((x) => [x.type, x.value]));
+  const off = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - h * 3600000;
+  etOffCache.set(h, off);
+  return off;
+}
+
+function resampleAligned(bars, target) {
+  const out = [];
+  let cur = null, curKey = null;
+  for (const b of bars) {
+    let start;
+    if (target < 3600000) start = Math.floor(b.openTime / target) * target;
+    else { const off = etOffset(b.openTime) + 6 * 3600000; start = Math.floor((b.openTime + off) / target) * target - off; }
+    if (start !== curKey) {
+      if (cur) out.push(cur);
+      curKey = start;
+      cur = { openTime: start, closeTime: start + target - 1, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
+    } else {
+      if (b.high > cur.high) cur.high = b.high;
+      if (b.low < cur.low) cur.low = b.low;
+      cur.close = b.close; cur.volume += b.volume;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function tfStrOf(ms) {
+  if (ms < 60000) return Math.round(ms / 1000) + 'S';
+  if (ms < 86400000) return String(Math.round(ms / 60000));
+  return 'D';
+}
+
+function qualifying(arrowValues, bars, a, formingLast) {
   const len = Math.max(2, Math.round(Number(a.rsiLength) || 14));
   const level = Number.isFinite(Number(a.rsiLevel)) ? Number(a.rsiLevel) : 50;
   const rsi = rsiSeries(bars, len);
   const out = [];
   for (let i = 0; i < bars.length; i++) {
-    const v = arrow.values[i];
+    const v = arrowValues[i];
     if (typeof v !== 'number' || v === 0 || rsi[i] === null) continue;
     const dir = v > 0 ? 1 : -1;
     if ((dir === 1 && rsi[i] < level) || (dir === -1 && rsi[i] > level)) {
-      out.push({ i, t: bars[i].openTime, dir, rsi: Math.round(rsi[i] * 10) / 10, price: bars[i].close, forming: !!m.lastBarForming && i === bars.length - 1 });
+      out.push({ i, t: bars[i].openTime, dir, rsi: Math.round(rsi[i] * 10) / 10, price: bars[i].close, forming: !!formingLast && i === bars.length - 1 });
     }
+  }
+  return out;
+}
+
+const mtfCache = new Map(); // script|symbol|tf|settings -> { sig, signals, n }
+
+// Signals for every timeframe the user picked in Alerts. Higher timeframes are built from the chart's
+// candles and only from completed candles, so they're ready the moment that candle closes.
+async function alertTimeframes(m, bars, chartSignals, src, inputs, info) {
+  const a = m.alerts || {};
+  const tfs = Array.isArray(a.tfs) ? [...new Set(a.tfs.map(Number).filter((x) => x > 0))] : [];
+  if (!a.enabled || !tfs.length || !chartSignals) return [];
+  const out = [];
+  for (const ms of tfs) {
+    if (ms === m.tfMs) { out.push({ ms, signals: chartSignals, n: bars.length }); continue; }
+    if (ms < m.tfMs || ms % m.tfMs !== 0) { out.push({ ms, unsupported: true, signals: [] }); continue; }
+    let rb = resampleAligned(bars, ms);
+    if (rb.length && rb[rb.length - 1].openTime + ms > Date.now()) rb = rb.slice(0, -1); // drop the candle still forming
+    const lenNeeded = Math.max(30, (Number(a.rsiLength) || 14) + 5);
+    if (rb.length < lenNeeded) { out.push({ ms, tooShort: true, have: rb.length, need: lenNeeded, signals: [] }); continue; }
+    const last = rb[rb.length - 1];
+    const key = `${m.script.id}|${m.symbol}|${ms}|${JSON.stringify(inputs)}|${a.rsiLength}|${a.rsiLevel}`;
+    const sig = `${rb.length}|${rb[0].openTime}|${last.openTime}|${last.close}|${last.high}|${last.low}`;
+    const hit = mtfCache.get(key);
+    if (hit && hit.sig === sig) { out.push({ ms, signals: hit.signals, n: hit.n }); continue; }
+    const tfStr = tfStrOf(ms);
+    const ind = new PineTSLib.Indicator(src, { ...inputs });
+    const pine = new PineTS(makeProvider(rb, tfStr, ms, info), info.ticker, tfStr, rb.length);
+    const ctx = await pine.run(ind);
+    const arrowPlot = Object.values(ctx.plots || {}).find((p) => p && p.options && (p.options.colorup !== undefined || p.options.colordown !== undefined));
+    const idx = new Map(rb.map((b, i) => [b.openTime, i]));
+    const vals = new Array(rb.length).fill(null);
+    for (const d of (arrowPlot && arrowPlot.data) || []) { const i = idx.get(d.time); if (i !== undefined) vals[i] = toNum(d.value); }
+    const signals = qualifying(vals, rb, a, false);
+    mtfCache.set(key, { sig, signals, n: rb.length });
+    if (mtfCache.size > 200) mtfCache.delete(mtfCache.keys().next().value);
+    out.push({ ms, signals, n: rb.length });
   }
   return out;
 }
@@ -393,10 +474,16 @@ async function runJob(m) {
       };
     }
 
+    const chartSignals = alertSignals(m, bars, plots);
+    let alertTfs = [];
+    if (chartSignals) {
+      try { alertTfs = await alertTimeframes(m, bars, chartSignals, src, { ...(cfg.inputs || {}) }, info); }
+      catch (e) { warnings.push('Alert timeframes: ' + (e && e.message)); }
+    }
     return {
       ...base, ok: true, ms: Math.round(performance.now() - t0),
       payload: { title, overlay, isStrategy, n, firstTime: bars[0].openTime, plots, drawings, strategy, pointValue: info.pointvalue, mintick: info.mintick,
-        alertSignals: alertSignals(m, bars, plots) },
+        alertSignals: chartSignals, alertTfs },
       meta: { ...meta, plots: plots.map((x) => ({ title: x.title, style: x.style, color: x.color, linewidth: x.linewidth })) },
       warnings: warnings.concat((ctx.warnings || []).slice(0, 5).map(String)),
     };
