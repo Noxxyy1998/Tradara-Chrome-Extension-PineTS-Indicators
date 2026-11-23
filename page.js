@@ -100,7 +100,6 @@
         keyByCanvas.set(canvas, key);
         st = makeState(key, canvas, ctl);
         charts.set(key, st);
-        hookUpdates(st);
         LOG('Attached to chart', key, label);
       } else if (!st.ctl || st.ctl.engine?.destroyed) {
         const ctl = findController(canvas);
@@ -118,23 +117,6 @@
         charts.delete(key);
         toContent({ type: 'chartGone', chartKey: key });
       }
-    }
-  }
-
-  // When Tradara pushes new data into the chart, check bars right away. Browsers pause animation frames and
-  // throttle timers in background tabs, so this keeps alerts on time while you're on another tab.
-  function hookUpdates(st) {
-    const targets = [[st.ctl, 'updateLastBar'], [st.ctl, 'setData'], [st.ctl.engine, 'updateLastBar'], [st.ctl.engine, 'setData']];
-    for (const [obj, name] of targets) {
-      const orig = obj && obj[name];
-      if (typeof orig !== 'function' || orig.__ptoHooked) continue;
-      const wrapped = function (...args) {
-        const r = orig.apply(this, args);
-        if (document.hidden) { try { st.nextBarsPoll = 0; queueMicrotask(() => { try { pollBars(st, performance.now()); } catch (_) {} }); } catch (_) {} }
-        return r;
-      };
-      wrapped.__ptoHooked = true;
-      try { obj[name] = wrapped; } catch (_) {}
     }
   }
 
@@ -1014,13 +996,22 @@
   }
   requestAnimationFrame(frame);
 
-  // rAF doesn't run in hidden tabs: keep reading bars (for alerts) with a timer
-  setInterval(() => {
+  // rAF doesn't run in hidden tabs, and page timers get slowed to once a minute there. A tiny worker keeps a
+  // steady 1-second tick so alerts stay on time in the background. This only reads the chart; it never
+  // changes anything inside Tradara.
+  function backgroundTick() {
     if (!document.hidden) return;
     const now = performance.now();
     try {
       if (now - lastDiscover > 1000) { lastDiscover = now; discover(); }
       for (const st of charts.values()) { try { pollBars(st, now); } catch (_) {} }
     } catch (_) {}
-  }, 1000);
+  }
+  let ticker = null;
+  try {
+    const url = URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},1000)'], { type: 'text/javascript' }));
+    ticker = new Worker(url);
+    ticker.onmessage = backgroundTick;
+  } catch (_) { ticker = null; }
+  if (!ticker) setInterval(backgroundTick, 1000);
 })();
