@@ -500,6 +500,20 @@ function num(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+// PineTS's browser build passes named arguments of table.new()/table.cell() (bgcolor=…, tooltip=…) as one
+// object stuck in the first optional slot. Spread such objects back into the right fields.
+const TABLE_DEFAULTS = { bgcolor: '', frame_color: '', frame_width: 0, border_color: '', border_width: 0 };
+const CELL_DEFAULTS = { width: 0, height: 0, text_color: '#000000', text_halign: 'center', text_valign: 'center', text_size: 'normal',
+  bgcolor: '', tooltip: '', text_font_family: 'default', text_formatting: 'none' };
+function unpackNamed(o, defaults, skip) {
+  for (const [k, v] of Object.entries(o)) {
+    if (skip.includes(k) || !v || typeof v !== 'object' || Array.isArray(v)) continue;
+    o[k] = k in defaults ? defaults[k] : undefined;
+    Object.assign(o, v);
+  }
+  return o;
+}
+
 // Pine defaults when PineTS leaves a color as "" (default) — na colors become null (invisible).
 function normDrawing(kind, o) {
   const dflt = (v, d) => (v === '' || v === undefined ? d : col(v));
@@ -508,6 +522,17 @@ function normDrawing(kind, o) {
   else if (kind === 'boxes') { o.border_color = dflt(o.border_color, '#2962FF'); o.bgcolor = dflt(o.bgcolor, '#2962FF33'); o.text_color = dflt(o.text_color, '#000000'); }
   else if (kind === 'linefills') o.color = col(o.color);
   else if (kind === 'polylines') { o.line_color = dflt(o.line_color, '#2962FF'); o.fill_color = col(o.fill_color); }
+  else if (kind === 'tables') {
+    unpackNamed(o, TABLE_DEFAULTS, ['cells', 'merges']);
+    o.bgcolor = col(o.bgcolor); o.frame_color = col(o.frame_color); o.border_color = col(o.border_color);
+    o.cells = (Array.isArray(o.cells) ? o.cells : []).map((row) => (Array.isArray(row) ? row : []).map((c) => (c && typeof c === 'object' ? unpackNamed({ ...c }, CELL_DEFAULTS, ['_merge_parent']) : c)).map((c) => (c && typeof c === 'object' ? {
+      text: c.text == null ? '' : String(c.text), width: Number(c.width) || 0, height: Number(c.height) || 0,
+      text_color: dflt(c.text_color, '#000000'), bgcolor: col(c.bgcolor),
+      text_halign: c.text_halign || 'center', text_valign: c.text_valign || 'center', text_size: c.text_size || 'normal',
+      tooltip: c.tooltip || '', font: c.text_font_family || 'default', formatting: c.text_formatting || 'none',
+      merged: !!c._merged, mergeParent: Array.isArray(c._merge_parent) ? c._merge_parent : null,
+    } : null)));
+  }
   return o;
 }
 

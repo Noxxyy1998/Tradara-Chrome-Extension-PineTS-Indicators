@@ -28,6 +28,8 @@ entry/exit arrows, trade lines and a performance panel. It's powered by LuxAlgo'
   - per-bar colors, `hline`, `fill`, `bgcolor`, `barcolor`
   - `plotshape`, `plotchar`, `plotarrow`
   - `label.new`, `line.new`, `box.new`, `linefill`, `polyline`
+  - **`table.new` / `table.cell`** dashboards: all 9 positions, colours, frame and borders, text size, alignment, fonts,
+    bold/italic, merged cells, cell width/height and tooltips
 - **`overlay=false` scripts** (RSI, MACD…) draw in a strip at the bottom of the chart
 - **Higher-timeframe `request.security`** on the same symbol, built from the chart's own bars
 - **Voice alerts** for EMA Rejections, filtered by RSI, with a spoken call-out and a desktop notification
@@ -98,7 +100,10 @@ Arrows that don't meet the rule stay silent.
 
 <img src="docs/images/settings-alerts.png" width="320" alt="Alerts settings"> Source: [`examples/ema_rejections.pine`](examples/ema_rejections.pine).
 
-An example strategy is also included in [`examples/sr_trend_v6.pine`](examples/sr_trend_v6.pine).
+An example strategy is also included in [`examples/sr_trend_v6.pine`](examples/sr_trend_v6.pine), and a table dashboard
+example in [`examples/dashboard_table.pine`](examples/dashboard_table.pine):
+
+![Table dashboard on the chart](docs/images/tables.png)
 
 ---
 
@@ -174,7 +179,7 @@ switches, dropdowns, price sources, colors, timeframes, text and dates. Change a
 
 ### Style
 - **Plots**: show or hide each plot, change its color and line width (including bar color, background and fills).
-- **Drawings**: turn labels, lines and boxes on or off.
+- **Drawings**: turn labels, lines, boxes and tables on or off.
 - **Strategy signals**:
   - show or hide trades, entry arrows, exit arrows and entry→exit lines
   - signal label text: *order name + quantity*, *order name*, *quantity*, *Buy / Sell*, or *none*
@@ -211,7 +216,6 @@ In the manager, under **Settings**:
   version.
 - **`request.security`** works for the same symbol at the chart timeframe or higher. Other symbols and lower timeframes
   return `na`.
-- **Not supported yet:** `table.*` drawings.
 - **Max trades per day** counts entries made with `strategy.entry()`. Entries made with `strategy.order()` aren't counted.
 - **If you add or reorder `input.*()` lines in your code**, use **Defaults → Reset this tab** on the Inputs tab, because
   saved input values are matched by position.

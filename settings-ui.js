@@ -18,7 +18,7 @@
     dayReset: 'session',
     style: {
       plots: {},
-      drawings: { labels: true, lines: true, boxes: true },
+      drawings: { labels: true, lines: true, boxes: true, tables: true },
       trades: {
         show: true, entries: true, exits: true, lines: true, labels: 'id_qty',
         longColor: '#2962FF', shortColor: '#F23645', exitColor: '#B388FF', size: 'normal',
@@ -430,7 +430,7 @@
           lineLike ? el('select', { onchange: (e) => upd('linewidth', Number(e.target.value)) }, [1, 2, 3, 4].map((w) => el('option', { value: w, selected: (ps.linewidth || p.linewidth || 1) === w ? true : null }, `${w}px`))) : el('span')));
       }
       out.push(el('div', { class: 'sec' }, 'Drawings'));
-      for (const [k, label] of [['labels', 'Labels'], ['lines', 'Lines'], ['boxes', 'Boxes']]) {
+      for (const [k, label] of [['labels', 'Labels'], ['lines', 'Lines'], ['boxes', 'Boxes'], ['tables', 'Tables']]) {
         out.push(el('label', { class: 'chk' }, el('input', { type: 'checkbox', checked: st.style.drawings[k] !== false, onchange: (e) => { st.style.drawings[k] = e.target.checked; commit(); } }), label));
       }
       if (isStrategy) {

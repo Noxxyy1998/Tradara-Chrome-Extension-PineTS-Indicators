@@ -114,6 +114,7 @@
         st.overlay.remove();
         if (st.legendHost) st.legendHost.remove();
         if (st.notesHost) st.notesHost.remove();
+        if (st.tablesHost) st.tablesHost.remove();
         charts.delete(key);
         toContent({ type: 'chartGone', chartKey: key });
       }
@@ -306,7 +307,11 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, cssW, cssH);
     renderNotes(st);
-    if (!config.settings.enabled || !st.bars) { if (st.legendHost) st.legendHost.style.display = 'none'; return; }
+    if (!config.settings.enabled || !st.bars) {
+      if (st.legendHost) st.legendHost.style.display = 'none';
+      if (st.tablesLayer && st.tablesHtml) { st.tablesLayer.innerHTML = ''; st.tablesHtml = ''; }
+      return;
+    }
 
     const pane = (ctl.mainPaneFrame && ctl.mainPaneFrame()) || { top: 0, bottom: cssH, width: cssW };
     const PX0 = 0, PX1 = pane.width, PY0 = pane.top, PY1 = pane.bottom;
@@ -385,6 +390,7 @@
     g.restore();
 
     updateLegend(st, PX1, PY0);
+    renderTables(st, ordered, { left: PX0, top: PY0, width: PX1 - PX0, height: PY1 - PY0 });
   }
 
   function fmtNum(v) {
@@ -846,6 +852,108 @@
     st.legendHost.style.left = (st.canvas.offsetLeft + right - 8) + 'px';
     st.legendHost.style.top = (st.canvas.offsetTop + top + 8) + 'px';
     st.legendHost.style.display = config.settings.enabled && items.length ? '' : 'none';
+  }
+
+  // ---------- tables (table.new / table.cell) ----------
+  const TABLES_CSS = `
+    :host { all: initial; }
+    .layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .slot { position: absolute; display: flex; flex-direction: column; gap: 6px; padding: 8px; box-sizing: border-box; }
+    .slot.top { top: 0; } .slot.middle { top: 50%; transform: translateY(-50%); } .slot.bottom { bottom: 0; }
+    .slot.left { left: 0; align-items: flex-start; } .slot.center { left: 50%; align-items: center; } .slot.right { right: 0; align-items: flex-end; }
+    .slot.center.top, .slot.center.bottom { transform: translateX(-50%); } .slot.center.middle { transform: translate(-50%, -50%); }
+    table { border-collapse: collapse; font-family: -apple-system, Segoe UI, Roboto, sans-serif; line-height: 1.25; }
+    td { padding: 3px 7px; white-space: pre; box-sizing: border-box; }
+    td[title] { pointer-events: auto; cursor: help; }
+  `;
+  const TABLE_FONT = { auto: 11, tiny: 8, small: 10, normal: 12, large: 16, huge: 22 };
+
+  function tableHtml(t, area) {
+    const cells = t.cells || [];
+    const rows = cells.length;
+    const cols = Math.max(0, ...cells.map((r) => r.length));
+    // spans for merged cells: children point at their parent [col, row]
+    const span = new Map();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const cell = cells[r] && cells[r][c];
+      if (cell && cell.merged && cell.mergeParent) {
+        const [pc, pr] = cell.mergeParent; const k = pr + ':' + pc;
+        const sp = span.get(k) || { c: 1, r: 1 };
+        sp.c = Math.max(sp.c, c - pc + 1); sp.r = Math.max(sp.r, r - pr + 1);
+        span.set(k, sp);
+      }
+    }
+    // skip rows / columns that are completely empty (never set by the script)
+    const rowUsed = (r) => (cells[r] || []).some((x) => x && (x.text || x.bgcolor || x.merged));
+    const colUsed = (c) => cells.some((row) => { const x = row && row[c]; return x && (x.text || x.bgcolor || x.merged); });
+    const usedCols = [...Array(cols).keys()].filter(colUsed);
+    let html = '';
+    for (let r = 0; r < rows; r++) {
+      if (!rowUsed(r)) continue;
+      let tr = '';
+      for (const c of usedCols) {
+        const cell = cells[r] && cells[r][c];
+        if (cell && cell.merged) continue;
+        if (!cell) { tr += '<td></td>'; continue; }
+        const sp = span.get(r + ':' + c);
+        const st = [`color:${cell.text_color || '#000'}`, `font-size:${TABLE_FONT[cell.text_size] || 12}px`,
+          `text-align:${cell.text_halign === 'left' ? 'left' : cell.text_halign === 'right' ? 'right' : 'center'}`,
+          `vertical-align:${cell.text_valign === 'top' ? 'top' : cell.text_valign === 'bottom' ? 'bottom' : 'middle'}`];
+        if (cell.bgcolor) st.push(`background:${cell.bgcolor}`);
+        if (t.border_color && t.border_width > 0) st.push(`border:${t.border_width}px solid ${t.border_color}`);
+        if (cell.width > 0) st.push(`width:${(cell.width / 100) * area.width}px`);
+        if (cell.height > 0) st.push(`height:${(cell.height / 100) * area.height}px`);
+        if (/monospace/i.test(cell.font)) st.push('font-family:ui-monospace,Menlo,Consolas,monospace');
+        if (/bold/i.test(cell.formatting)) st.push('font-weight:700');
+        if (/italic/i.test(cell.formatting)) st.push('font-style:italic');
+        tr += `<td${sp && sp.c > 1 ? ` colspan="${sp.c}"` : ''}${sp && sp.r > 1 ? ` rowspan="${sp.r}"` : ''}${cell.tooltip ? ` title="${esc(cell.tooltip)}"` : ''} style="${st.join(';')}">${esc(cell.text)}</td>`;
+      }
+      html += `<tr>${tr}</tr>`;
+    }
+    if (!html) return '';
+    const ts = [];
+    if (t.bgcolor) ts.push(`background:${t.bgcolor}`);
+    if (t.frame_color && t.frame_width > 0) ts.push(`outline:${t.frame_width}px solid ${t.frame_color}`, `outline-offset:0`);
+    return `<table style="${ts.join(';')}">${html}</table>`;
+  }
+
+  function renderTables(st, ordered, pane) {
+    const groups = {}; // "top right" -> [html]
+    for (const o of ordered) {
+      if (!o.r.ok || !o.r.payload) continue;
+      const ds = (o.s.settings && o.s.settings.style && o.s.settings.style.drawings) || {};
+      if (ds.tables === false) continue;
+      const area = o.band ? { left: pane.left, top: o.band.top, width: pane.width, height: o.band.bottom - o.band.top } : pane;
+      for (const t of (o.r.payload.drawings && o.r.payload.drawings.tables) || []) {
+        const pos = String(t.position || 'top_right').replace('position.', '');
+        const [v, h] = pos.split('_');
+        const key = `${o.band ? o.s.id : 'main'}|${v || 'top'}|${h || 'right'}`;
+        const html = tableHtml(t, area);
+        if (html) (groups[key] = groups[key] || { area, v: v || 'top', h: h || 'right', html: [] }).html.push(html);
+      }
+    }
+    const keys = Object.keys(groups);
+    if (!keys.length && !st.tablesHost) return;
+    if (!st.tablesHost || !st.tablesHost.isConnected) {
+      const host = document.createElement('div');
+      host.dataset.pinetsOverlay = 'tables';
+      Object.assign(host.style, { position: 'absolute', zIndex: '2', pointerEvents: 'none' });
+      st.canvas.parentElement.appendChild(host);
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TABLES_CSS}</style><div class="layer"></div>`;
+      st.tablesHost = host; st.tablesLayer = root.querySelector('.layer'); st.tablesHtml = '';
+    }
+    const c = st.canvas;
+    Object.assign(st.tablesHost.style, { left: c.offsetLeft + 'px', top: c.offsetTop + 'px', width: c.clientWidth + 'px', height: c.clientHeight + 'px' });
+    // keep top-right tables clear of the extension's legend
+    const legendH = st.legendHost && st.legendHost.style.display !== 'none' ? st.legendHost.offsetHeight + 8 : 0;
+    const out = keys.map((k) => {
+      const g = groups[k];
+      const pad = g.v === 'top' && g.h === 'right' && g.area === pane ? legendH : 0;
+      const box = `left:${g.area.left}px;top:${g.area.top + pad}px;width:${g.area.width}px;height:${Math.max(0, g.area.height - pad)}px`;
+      return `<div style="position:absolute;${box}"><div class="slot ${esc(g.v)} ${esc(g.h)}">${g.html.join('')}</div></div>`;
+    }).join('');
+    if (out !== st.tablesHtml) { st.tablesLayer.innerHTML = out; st.tablesHtml = out; }
   }
 
   // ---------- chart notes (draggable text boxes) ----------
