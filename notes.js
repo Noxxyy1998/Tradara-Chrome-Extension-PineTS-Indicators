@@ -40,6 +40,7 @@
     noteSel = id;
     document.body.classList.add('mode-note');
     $('scriptPanel').hidden = true;
+    if (window.botHide) window.botHide();
     $('notePanel').hidden = false;
     renderNoteList();
     renderNoteEditor();

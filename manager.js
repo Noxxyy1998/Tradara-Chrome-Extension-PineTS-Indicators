@@ -44,6 +44,7 @@ function current() { return state.scripts.find((s) => s.id === selId); }
 
 function showScriptPanel() {
   document.body.classList.remove('mode-note');
+  if (window.botHide) window.botHide();
   $('scriptPanel').hidden = false;
   $('notePanel').hidden = true;
   if (window.notesDeselect) window.notesDeselect();

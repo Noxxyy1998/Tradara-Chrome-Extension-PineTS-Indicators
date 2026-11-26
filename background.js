@@ -2,6 +2,9 @@
 // Using the extension's own TTS means alerts work even when the Tradara tab is in the background.
 'use strict';
 
+// let the Tradara page's content script read the bot's unlocked flag (session storage is in memory only)
+try { chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }); } catch (_) {}
+
 const notifTabs = new Map(); // notification id -> tab id (click to jump back to the chart)
 
 // Prefer the most natural-sounding installed voice when none is chosen

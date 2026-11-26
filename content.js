@@ -83,6 +83,29 @@
     }, 500);
   }
 
+  // ---------- trading bot ----------
+  const brokerWait = new Map();
+  let brokerSeq = 0;
+  const brokerProxy = {
+    call(op, args) {
+      return new Promise((resolve, reject) => {
+        const id = ++brokerSeq;
+        const timer = setTimeout(() => { brokerWait.delete(id); reject(new Error('Tradara did not respond in time')); }, 20000);
+        brokerWait.set(id, { resolve, reject, timer });
+        toPage({ type: 'brokerCall', id, op, args });
+      });
+    },
+  };
+  function botSay(text, title, o) {
+    const ema = scripts.find((x) => /EMA Confirmation Break/.test(x.code || ''));
+    const a = mergeSettings(ema && ema.settings).alerts;
+    sayAlert(text, title, { ...a, voice: o.voice && a.voice !== false, notify: true });
+  }
+  const bot = typeof PTOBot !== 'undefined' ? new PTOBot.Engine({
+    say: botSay, broker: brokerProxy,
+    onStatus: (status) => toPage({ type: 'botStatus', status }),
+  }) : null;
+
   // ---------- voice alerts ----------
   const alertSeen = new Map(); // script|chart|symbol|tf -> time of the newest closed signal already handled
 
@@ -111,10 +134,11 @@
     const b = lastBars.get(chartKey);
     if (!s || !b || !Array.isArray(payload.alertTfs)) return;
     const a = mergeSettings(s.settings).alerts;
+    const mine = new Set((a.tfs || ['chart']).map((x) => (x === 'chart' ? b.tfMs : Number(x))));
     for (const tf of payload.alertTfs) {
-      if (!tf || !Array.isArray(tf.signals) || tf.unsupported || tf.tooShort) continue;
+      if (!tf || !Array.isArray(tf.signals) || tf.unsupported || tf.tooShort || !mine.has(tf.ms)) continue;
       const key = `${scriptId}|${chartKey}|${b.symbol}|${tf.ms}|${a.rsiLength}|${a.rsiLevel}`;
-      const closed = tf.signals.filter((x) => !x.forming);
+      const closed = tf.signals.filter((x) => !x.forming && x.q !== false); // alerts only for arrows that meet the RSI rule
       const newest = closed.length ? closed[closed.length - 1].t : 0;
       if (!alertSeen.has(key)) { alertSeen.set(key, newest); continue; } // first look: signals already there are history
       const seen = alertSeen.get(key);
@@ -230,10 +254,15 @@
         bars, symbol: b.symbol, tf: b.tf, tfMs: b.tfMs,
         pointValueOverride: Number(settings.pointValue) || 0,
         settings: { inputs: ss.inputs, props: ss.props, maxTradesPerDay: ss.maxTradesPerDay, dayReset: ss.dayReset },
-        alerts: {
-          enabled: !!ss.alerts.enabled, rsiLength: ss.alerts.rsiLength, rsiLevel: ss.alerts.rsiLevel,
-          tfs: (ss.alerts.tfs || ['chart']).map((x) => (x === 'chart' ? b.tfMs : Number(x))).filter((x) => x > 0),
-        },
+        alerts: (() => {
+          const alertTfs = ss.alerts.enabled ? (ss.alerts.tfs || ['chart']).map((x) => (x === 'chart' ? b.tfMs : Number(x))).filter((x) => x > 0) : [];
+          const bw = bot && /EMA Confirmation Break/.test(s.code) ? bot.wants(b.tfMs) : null;
+          return {
+            enabled: !!ss.alerts.enabled || !!bw, rsiLength: ss.alerts.rsiLength, rsiLevel: ss.alerts.rsiLevel,
+            tfs: [...new Set([...alertTfs, ...(bw ? [bw.tfMs] : [])])],
+            botRsiLength: bw ? bw.rsiLength : 0,
+          };
+        })(),
         lastBarForming: !!b.lastBarForming,
       });
     }
@@ -278,7 +307,14 @@
           applied.set(m.key, m.reqId);
           setStatus(m.scriptId, { ok: m.ok, error: m.error || null, ms: m.ms || null, warnings: m.warnings || [], at: Date.now() });
           toPage({ type: 'result', chartKey: m.chartKey, scriptId: m.scriptId, ok: m.ok, error: m.error, payload: m.payload });
-          if (m.ok && m.payload && Array.isArray(m.payload.alertSignals)) handleAlerts(m.scriptId, m.chartKey, m.payload);
+          if (m.ok && m.payload && Array.isArray(m.payload.alertSignals)) {
+            handleAlerts(m.scriptId, m.chartKey, m.payload);
+            const lb = lastBars.get(m.chartKey);
+            if (bot && lb) {
+              const bars = lb.bars; bars.lastBarForming = !!lb.lastBarForming;
+              bot.onResult({ chartKey: m.chartKey, symbol: lb.symbol, chartTfMs: lb.tfMs, payload: m.payload, bars });
+            }
+          }
         }
         flushPending();
       }
@@ -291,6 +327,8 @@
     if (m.type === 'openSettings' && window.PTOSettings) { window.PTOSettings.open(m.scriptId, { tab: m.tab }); return; }
     if (m.type === 'toggleHidden') { setHidden(m.scriptId, !!m.hidden); return; }
     if (m.type === 'noteUpdate') { updateNote(m.id, m.patch); return; }
+    if (m.type === 'brokerReply') { const p = brokerWait.get(m.id); if (p) { brokerWait.delete(m.id); clearTimeout(p.timer); m.ok ? p.resolve(m.result) : p.reject(new Error(m.error)); } return; }
+    if (m.type === 'botKill') { if (bot) bot.kill('the chart stop button'); return; }
     if (m.type === 'toggleAlertVoice') { patchAlerts(m.scriptId, { voice: !!m.on, notify: !!m.on }); return; }
     if (m.type === 'bars') {
       lastBars.set(m.chartKey, m);
@@ -320,6 +358,13 @@
     cfgVersion++;
     scripts = Array.isArray(data.scripts) ? data.scripts : [];
   }
+
+  // bot switched on/off or unlocked: re-run so the indicator also computes the bot's timeframe
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if ((area === 'local' && changes.bot) || (area === 'session' && changes.botUnlocked)) {
+      setTimeout(() => { cfgVersion++; for (const k of lastBars.keys()) runAll(k); }, 400);
+    }
+  });
 
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local' || (!changes.settings && !changes.scripts && !changes.notes)) return;

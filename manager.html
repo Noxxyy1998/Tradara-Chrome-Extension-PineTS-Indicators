@@ -47,6 +47,31 @@
   .muted { color: var(--mut); }
   textarea.notetext { font: 14px/1.55 -apple-system, Segoe UI, Roboto, sans-serif; white-space: pre-wrap; }
   body.mode-note #list .item.sel { background: none; border-left-color: transparent; }
+  #botPanel { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 40px; }
+  #botPanel[hidden] { display: none; }
+  #botPanel h2 { margin: 0; font-size: 18px; } #botPanel h3 { margin: 4px 0 10px; font-size: 13px; color: var(--acc); text-transform: uppercase; letter-spacing: .05em; }
+  .bothead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; } .bothead .sp { flex: 1; }
+  .botcard { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .botcard.narrow { max-width: 440px; margin: 40px auto; display: grid; gap: 10px; }
+  .botcard label { display: grid; gap: 4px; margin: 8px 0; color: var(--fg); }
+  .botcard label.radio, .botcard label.chk { display: flex; gap: 8px; align-items: flex-start; }
+  .botcard input[type=number], .botcard input[type=time], .botcard input[type=password], .botcard input[type=text], .botcard select {
+    background: #0b0d13; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font: inherit; }
+  .botgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .line { display: flex; gap: 8px; } .line select { flex: 1; }
+  .status .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .status .k { color: var(--mut); font-size: 11px; text-transform: uppercase; } .status .v { font-size: 15px; margin-top: 2px; }
+  .status.live { border-color: #ffb74d; } .live { color: #ffb74d; }
+  .status .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+  .halt { margin-top: 10px; color: #ef5350; display: flex; gap: 10px; align-items: center; }
+  button.big { padding: 10px 16px; font-weight: 600; }
+  .ack { margin-top: 12px !important; padding: 10px; border: 1px solid #5c4a1a; border-radius: 8px; background: rgba(255,183,77,.06); }
+  .err { color: #ef5350; } .pos { color: #26a69a; } .neg { color: #ef5350; } .small { font-size: 12px; }
+  table.journal { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.journal td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  table.journal td:first-child { white-space: nowrap; color: var(--mut); }
+  table.journal tr.entry td:nth-child(3) { color: #80deea; } table.journal tr.halt td:nth-child(3) { color: #ef5350; } table.journal tr.skip td { color: var(--mut); }
   .saved { color: #26a69a; font-size: 12px; opacity: 0; transition: opacity .3s; }
   .saved.show { opacity: 1; }
 </style>
@@ -60,6 +85,8 @@
       <div class="sh">Chart notes</div>
       <div id="noteList"></div>
       <button id="newNote" class="addnote">+ New note</button>
+      <div class="sh">Automation</div>
+      <button id="botOpen" class="addnote">🤖 Auto-Trading 🔒</button>
     </div>
     <div class="new">
       <button id="newStrategy">+ New strategy</button>
@@ -85,6 +112,7 @@
       </div>
       <textarea id="noteText" class="notetext" spellcheck="true" placeholder="Type or paste your note…"></textarea>
     </section>
+    <section id="botPanel" hidden><div id="botBody"></div></section>
     <section id="scriptPanel">
     <div class="bar" id="toolbar">
       <input type="text" id="name" placeholder="Script name">
@@ -113,5 +141,7 @@
   <script src="settings-ui.js"></script>
   <script src="manager.js"></script>
   <script src="notes.js"></script>
+  <script src="bot.js"></script>
+  <script src="bot-ui.js"></script>
 </body>
 </html>

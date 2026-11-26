@@ -33,6 +33,7 @@ entry/exit arrows, trade lines and a performance panel. It's powered by LuxAlgo'
 - **`overlay=false` scripts** (RSI, MACD…) draw in a strip at the bottom of the chart
 - **Higher-timeframe `request.security`** on the same symbol, built from the chart's own bars
 - **Voice alerts** for EMA Rejections, filtered by RSI, with a spoken call-out and a desktop notification
+- **🤖 Auto-Trading (password-protected)** for EMA Rejections: Paper or Live mode, bracket orders, safety limits, journal
 - **Chart notes**: put your own text boxes on the chart (signal guides, trading rules, checklists) that you can drag, resize and collapse
 - **Self-healing**: if the page interferes with the extension, it restarts itself automatically
 - **Private**: makes no network requests. Your scripts and settings stay in your browser.
@@ -142,6 +143,50 @@ view. A **Signal guide** example is included.
 - Position and size are remembered, and the box stays in the same spot relative to the chart when you resize the window.
 
 ![A chart note on the chart](docs/images/chart-note.png)
+
+---
+
+## 🤖 Auto-Trading (EMA Rejections)
+
+> **Read this first.** Live mode places **real orders on your Tradara account without asking you first**. Check that your
+> prop firm / evaluation allows automated trading, test in **Paper** mode first, and start with 1 contract. Backtests and
+> paper results don't guarantee live results. This is not financial advice.
+
+Open the manager, then **🤖 Auto-Trading 🔒**. The first time, you set a password. After that, Auto-Trading needs the
+password to open; it stays unlocked until you press **Lock** or close Chrome. Locking switches the bot off.
+
+![Auto-Trading settings](docs/images/auto-trading.png)
+
+**Modes**
+- **Off**
+- **Paper**: trades on paper from EMA Rejections signals. No orders are sent; fills are simulated at the signal candle's close, and the stop and target are checked on every later candle (if both are inside one candle, it assumes the stop).
+- **Live**: places real orders on the account you pick. Only available after you choose an account and tick the
+  "I understand" box.
+
+**How a live trade works**
+1. A signal appears on a **closed** candle of the chosen timeframe and passes your rules.
+2. The bot checks that the account isn't locked by Tradara and has no position the bot didn't open.
+3. It sends **one bracket order**: a market entry with the stop-loss and take-profit attached on Tradara's servers
+   (an OTOCO group), so your exits stay in place even if the browser or PC goes down. Every order carries a unique
+   idempotency key, so a retry can never double an order.
+4. It confirms the fill, then watches the position. When Tradara fills the stop or target, the bot records the result
+   using the account's real equity change.
+
+**Rules you can set**: signal timeframe, long/short/both, RSI filter (length and level), contracts, stop and target in
+ticks, what to do on an opposite arrow (close / reverse / ignore), and a daily "close everything" time.
+
+**Safety limits** (the bot stops itself until the next trading day when hit): max trades per day, max daily loss ($),
+losses in a row, max contracts, and a trading-hours window (ET). It also stops on any order error, if Tradara locks the
+account, if the entry isn't filled, or if the account already has a position it didn't open. It only runs in one Tradara
+tab at a time.
+
+**Stop button**: **⏹** in the chart legend, or **Stop bot & close its position** in the manager. This switches the bot
+off and closes the position *the bot opened*; it never touches trades you placed yourself.
+
+**Journal**: every signal, skip (with the reason), entry, exit, P&L and stop is logged in the Auto-Trading tab.
+
+Requirements: Tradara open in a tab, with EMA Rejections on and showing on the chart. If the bot is mid-trade and you
+close Tradara, the stop and target are still on Tradara's servers, but the bot can't record the result until you reopen it.
 
 ---
 
@@ -261,6 +306,8 @@ Tradara chart ──bars──▶ page.js ──▶ content.js ──▶ sandbox
 manifest.json          Extension manifest (Manifest V3)
 page.js                Chart detection, rendering, legend
 content.js             Storage, messaging, engine watchdog, alert logic
+bot.js                 Auto-Trading engine, password, safety limits
+bot-ui.js              Auto-Trading tab (manager)
 background.js          Voice (chrome.tts) and desktop notifications
 sandbox.html/.js       PineTS runner
 settings-ui.js         Inputs / Properties / Style / Visibility dialog

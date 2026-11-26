@@ -13,6 +13,7 @@
   let config = { settings: { enabled: true, maxBars: 5000, strategyClosedBarsOnly: true, showTrades: true, showHud: true, pointValue: 0 }, scripts: [] };
   let configVersion = 0;
   let notes = []; // chart notes (text boxes) from the manager
+  let botStatus = null, botStatusSig = ''; // trading bot status (shown on the EMA Rejections legend item)
   let chartSeq = 0;
   const charts = new Map(); // chartKey -> state
   const keyByCanvas = new WeakMap();
@@ -51,6 +52,9 @@
         st.forceSend = true;
         st.dirty = true;
       }
+    } else if (m.type === 'botStatus') {
+      const sig = JSON.stringify(m.status);
+      if (sig !== botStatusSig) { botStatusSig = sig; botStatus = m.status; for (const st of charts.values()) st.dirty = true; }
     } else if (m.type === 'result') {
       const st = charts.get(m.chartKey);
       if (!st) return;
@@ -59,6 +63,101 @@
     }
   });
   toContent({ type: 'hello' });
+
+  // ---------- broker: Tradara order API (used only by the trading bot in Live mode) ----------
+  // Same endpoints, cookie login and JSON format as Tradara's own app. Every order carries an
+  // Idempotency-Key so a retried request can never create a second order.
+  const API = 'https://api.tradara.com';
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  async function api(path, opts = {}) {
+    const r = await fetch(API + path, {
+      method: opts.method || 'GET', credentials: 'include', mode: 'cors',
+      headers: { Accept: 'application/json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.key ? { 'Idempotency-Key': opts.key } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const text = await r.text();
+    let json = null; try { json = text ? JSON.parse(text) : null; } catch (_) {}
+    if (!r.ok) {
+      const msg = (json && (json.error || json.message || (json.detail && String(json.detail)))) || `HTTP ${r.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return json;
+  }
+
+  // the tradable contract shown on a chart (e.g. /NQZ26 for the /NQ chart)
+  function findInstrumentId(st) {
+    const host = st.canvas.parentElement;
+    const fk = host && Object.keys(host).find((k) => k.startsWith('__reactFiber'));
+    let f = fk && host[fk];
+    for (let depth = 0; f && depth < 40; depth++, f = f.return) {
+      let h = f.memoizedState;
+      for (let i = 0; h && i < 150; i++, h = h.next) {
+        const v = h.memoizedState;
+        const c = v && typeof v === 'object' && 'current' in v ? v.current : v;
+        if (c && typeof c === 'object' && typeof c.instrumentId === 'string' && typeof c.symbol === 'string' && c.instrumentId.length > 20) return c.instrumentId;
+      }
+    }
+    return null;
+  }
+
+  const broker = {
+    async accounts() {
+      const j = await api('/v1/accounts/me?limit=50&offset=0');
+      return ((j && j.items) || []).map((a) => ({ id: a.id, name: a.account_name_condensed || a.account_name, type: a.account_type, firm: a.firm_name, open: !a.closed_at }));
+    },
+    async instrument({ chartKey }) {
+      const st = charts.get(chartKey) || [...charts.values()][0];
+      if (!st) throw new Error('No Tradara chart found');
+      const id = findInstrumentId(st);
+      if (!id) throw new Error('Could not find the contract for this chart');
+      const j = await api('/v1/instruments/' + encodeURIComponent(id));
+      if (!j || !/contract/i.test(j.instrument_type || '')) throw new Error(`${(j && j.symbol) || id} is not a tradable contract`);
+      const fp = j.futures_product || {};
+      return { id: j.instrument_id || id, symbol: j.symbol, tick: Number(fp.tick_size) || null, pointValue: Number(fp.value_per_point) || null };
+    },
+    async position({ accountId, instrumentId }) {
+      const j = await api(`/v1/accounts/${encodeURIComponent(accountId)}/positions?include_flat=false`);
+      const p = ((j && j.items) || []).find((x) => !x.closed_at && (x.instrument_id || '').trim() === instrumentId);
+      return p ? { qty: Number(p.net_qty) || 0, avg: Number(p.avg_entry_price) || null } : { qty: 0, avg: null };
+    },
+    async risk({ accountId }) {
+      const j = await api(`/v1/risk/accounts/${encodeURIComponent(accountId)}/state`);
+      return { locked: !!j.is_locked, reason: j.lock_reason || j.lockout_reason || '', equity: Number(j.equity), balance: Number(j.balance) };
+    },
+    // market entry with stop-loss and take-profit attached on Tradara's servers (OTOCO bracket)
+    async placeBracket({ accountId, instrumentId, symbol, side, qty, stopTicks, targetTicks }) {
+      const dir = side === 'BUY' ? 1 : -1;
+      const exitSide = side === 'BUY' ? 'SELL' : 'BUY';
+      const base = { account_id: accountId, instrument_id: instrumentId, quantity: qty };
+      const entry = { ...base, side, execution_type: 'MARKET', time_in_force: 'IOC', metadata: { source: 'pinets-overlay-bot', symbol } };
+      const legs = [];
+      if (targetTicks > 0) legs.push({ ...base, side: exitSide, execution_type: 'LIMIT', time_in_force: 'GTC', offset_ticks: Math.round(dir * targetTicks) });
+      if (stopTicks > 0) legs.push({ ...base, side: exitSide, execution_type: 'STOP', time_in_force: 'GTC', offset_ticks: Math.round(-dir * stopTicks) });
+      const body = legs.length === 2 ? { account_id: accountId, group_type: 'OTOCO', trigger_order: entry, linked_orders: legs }
+        : legs.length === 1 ? { account_id: accountId, group_type: 'OTO', trigger_order: entry, triggered_order: legs[0] }
+        : null;
+      if (!body) throw new Error('A stop-loss is required');
+      return api('/v1/orders/groups', { method: 'POST', body, key: uuid() });
+    },
+    async flatten({ accountId }) {
+      await api('/v1/orders/flatten', { method: 'POST', body: { account_id: accountId }, key: uuid() });
+      try { await api(`/v1/orders/cancel-all?account_id=${encodeURIComponent(accountId)}`, { method: 'POST', body: {} }); } catch (_) {}
+      return true;
+    },
+  };
+
+  window.addEventListener('message', async (ev) => {
+    if (ev.source !== window) return;
+    const m = ev.data;
+    if (!m || m[TAG] !== true || m.dir !== 'toPage' || m.type !== 'brokerCall') return;
+    try {
+      if (!Object.prototype.hasOwnProperty.call(broker, m.op)) throw new Error('Unknown operation');
+      const result = await broker[m.op](m.args || {});
+      toContent({ type: 'brokerReply', id: m.id, ok: true, result });
+    } catch (e) {
+      toContent({ type: 'brokerReply', id: m.id, ok: false, error: (e && e.message) || String(e) });
+    }
+  });
 
   // ---------- chart discovery ----------
   function findController(canvas) {
@@ -734,7 +833,7 @@
     const h = (arrow && (arrow.maxheight || arrow.minheight) || 35) * 0.8;
     g.font = 'bold 10px -apple-system, Segoe UI, Roboto, sans-serif'; g.textAlign = 'center';
     for (const sgl of p.alertSignals) {
-      if (sgl.i < iFrom || sgl.i > iTo) continue;
+      if (sgl.q === false || sgl.i < iFrom || sgl.i > iTo) continue;
       const bar = bars[off + sgl.i], x = X(off + sgl.i);
       if (!bar || !isNum(x)) continue;
       const up = sgl.dir > 0;
@@ -786,6 +885,7 @@
       e.preventDefault();
       const id = b.dataset.id;
       if (b.dataset.act === 'eye') toContent({ type: 'toggleHidden', scriptId: id, hidden: b.dataset.hidden !== '1' });
+      else if (b.dataset.act === 'botstop') { if (window.confirm('Stop the trading bot and close its open position?')) toContent({ type: 'botKill' }); }
       else if (b.dataset.act === 'bell') toContent({ type: 'toggleAlertVoice', scriptId: id, on: b.dataset.on !== '1' });
       else toContent({ type: 'openSettings', scriptId: id });
     });
@@ -835,13 +935,25 @@
           else if (x.tooShort) lines.push({ t: `${tfName(x.ms)} alerts need more history (raise Max bars)`, c: '#e0a800' });
         }
       }
-      items.push({ id: s.id, title, hidden, off: hidden || tfOff, lines, canAlert, bellOn });
+      let botOn = false;
+      if (canAlert && botStatus && botStatus.unlocked && (botStatus.mode !== 'off' || botStatus.position)) {
+        const b = botStatus;
+        botOn = b.mode !== 'off' || !!b.position;
+        const money = (v) => `${v < 0 ? '-' : '+'}$${Math.abs(v || 0).toFixed(0)}`;
+        const tag = b.mode === 'live' ? '🤖 LIVE' : b.mode === 'paper' ? '🤖 PAPER' : '🤖 OFF';
+        const pos = b.position ? `${b.position.dir > 0 ? 'LONG' : 'SHORT'} ${b.position.qty} @ ${b.position.entry}` : 'flat';
+        lines.push({ t: `${tag} · ${pos} · ${b.tradesToday}/${b.maxTrades} today · ${money(b.pnlToday)}`, c: b.mode === 'live' ? '#ffb74d' : '#80deea' });
+        if (b.halted) lines.push({ t: `⏹ Stopped: ${b.halted}`, c: '#ef5350' });
+        else if (b.note) lines.push({ t: b.note, c: '#e0a800' });
+      }
+      items.push({ id: s.id, title, hidden, off: hidden || tfOff, lines, canAlert, bellOn, botOn });
     }
     ensureLegend(st);
     const html = items.map((it) => `
       <div class="item${it.off ? ' off' : ''}">
         <div class="head">
           <span class="name" data-act="gear" data-id="${esc(it.id)}" title="Settings">◆ ${esc(it.title)}</span>
+          ${it.botOn ? `<button data-act="botstop" data-id="${esc(it.id)}" title="Stop the trading bot (closes its position)" style="color:#ef5350">⏹</button>` : ''}
           ${it.canAlert ? `<button data-act="bell" data-id="${esc(it.id)}" data-on="${it.bellOn ? '1' : '0'}" title="${it.bellOn ? 'Mute voice alerts' : 'Turn voice alerts on'}">${it.bellOn ? ICON_BELL : ICON_BELL_OFF}</button>` : ''}
           <button data-act="eye" data-id="${esc(it.id)}" data-hidden="${it.hidden ? '1' : '0'}" title="${it.hidden ? 'Show' : 'Hide'}">${it.hidden ? ICON_EYE_OFF : ICON_EYE}</button>
           <button data-act="gear" data-id="${esc(it.id)}" title="Settings">${ICON_GEAR}</button>

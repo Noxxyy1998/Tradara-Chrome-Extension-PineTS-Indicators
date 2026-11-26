@@ -246,14 +246,18 @@ function qualifying(arrowValues, bars, a, formingLast) {
   const len = Math.max(2, Math.round(Number(a.rsiLength) || 14));
   const level = Number.isFinite(Number(a.rsiLevel)) ? Number(a.rsiLevel) : 50;
   const rsi = rsiSeries(bars, len);
+  const botLen = Math.round(Number(a.botRsiLength) || 0);
+  const rsiB = botLen >= 2 && botLen !== len ? rsiSeries(bars, botLen) : null;
   const out = [];
   for (let i = 0; i < bars.length; i++) {
     const v = arrowValues[i];
     if (typeof v !== 'number' || v === 0 || rsi[i] === null) continue;
     const dir = v > 0 ? 1 : -1;
-    if ((dir === 1 && rsi[i] < level) || (dir === -1 && rsi[i] > level)) {
-      out.push({ i, t: bars[i].openTime, dir, rsi: Math.round(rsi[i] * 10) / 10, price: bars[i].close, forming: !!formingLast && i === bars.length - 1 });
-    }
+    // q = meets the RSI rule (green below the level, orange above it)
+    const q = (dir === 1 && rsi[i] < level) || (dir === -1 && rsi[i] > level);
+    const sig = { i, t: bars[i].openTime, dir, q, rsi: Math.round(rsi[i] * 10) / 10, price: bars[i].close, forming: !!formingLast && i === bars.length - 1 };
+    if (rsiB) sig.rsiB = rsiB[i] === null ? null : Math.round(rsiB[i] * 10) / 10;
+    out.push(sig);
   }
   return out;
 }
@@ -275,7 +279,7 @@ async function alertTimeframes(m, bars, chartSignals, src, inputs, info) {
     const lenNeeded = Math.max(30, (Number(a.rsiLength) || 14) + 5);
     if (rb.length < lenNeeded) { out.push({ ms, tooShort: true, have: rb.length, need: lenNeeded, signals: [] }); continue; }
     const last = rb[rb.length - 1];
-    const key = `${m.script.id}|${m.symbol}|${ms}|${JSON.stringify(inputs)}|${a.rsiLength}|${a.rsiLevel}`;
+    const key = `${m.script.id}|${m.symbol}|${ms}|${JSON.stringify(inputs)}|${a.rsiLength}|${a.rsiLevel}|${a.botRsiLength || 0}`;
     const sig = `${rb.length}|${rb[0].openTime}|${last.openTime}|${last.close}|${last.high}|${last.low}`;
     const hit = mtfCache.get(key);
     if (hit && hit.sig === sig) { out.push({ ms, signals: hit.signals, n: hit.n }); continue; }
