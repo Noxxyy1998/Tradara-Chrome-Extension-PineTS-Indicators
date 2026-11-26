@@ -1,3 +1,8 @@
 .DS_Store
 *.zip
 node_modules/
+
+# never commit license signing keys
+*PRIVATE*
+*private-key*
+admin/

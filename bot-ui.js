@@ -20,9 +20,29 @@
 
   async function render() {
     const root = $('botBody');
+    const lic = await window.PTOLicense.status();
+    if (!lic.ok) return renderActivate(root, lic);
+    licInfo = lic.payload;
     if (!(await B.auth.hasPassword())) return renderCreate(root);
     if (!(await B.auth.isUnlocked())) return renderLocked(root);
     return renderUnlocked(root);
+  }
+
+  let licInfo = null;
+  function renderActivate(root, lic) {
+    root.innerHTML = `
+      <div class="botcard narrow">
+        <h2>🔑 Activate Auto-Trading</h2>
+        <p class="muted">Auto-Trading needs a license key. Paste the key you received after purchase (it starts with <b>PTO1-</b>).</p>
+        ${lic && !lic.none ? `<div class="err">${esc(lic.error)}</div>` : ''}
+        <label>License key <textarea id="licIn" rows="4" spellcheck="false" placeholder="PTO1-…" style="background:#0b0d13;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:12px ui-monospace,Menlo,Consolas,monospace;resize:vertical"></textarea></label>
+        <div class="err" id="licErr"></div>
+        <button class="primary" id="licGo">Activate</button>
+      </div>`;
+    $('licGo').onclick = async () => {
+      const r = await window.PTOLicense.activate($('licIn').value);
+      if (r.ok) render(); else $('licErr').textContent = r.error;
+    };
   }
 
   function renderCreate(root) {
@@ -78,6 +98,7 @@
       <div class="bothead">
         <h2>🤖 Auto-Trading <span class="muted">· EMA Rejections</span></h2>
         <span class="sp"></span>
+        <span class="muted small" title="License ${esc(licInfo && licInfo.id)}">🔑 Licensed to ${esc((licInfo && (licInfo.n || licInfo.e)) || '')}${licInfo && licInfo.exp ? ` · until ${new Date(licInfo.exp).toLocaleDateString()}` : ''}</span>
         <button id="lockBtn">🔒 Lock</button>
       </div>
 
@@ -139,6 +160,10 @@
         <table class="journal"><tbody>${botJournal.slice(-80).reverse().map((j) => `<tr class="${j.kind}"><td>${new Date(j.at).toLocaleString()}</td><td>${esc(j.mode || '')}</td><td>${esc(j.text)}</td><td class="${j.pnl < 0 ? 'neg' : 'pos'}">${j.pnl !== undefined ? money(j.pnl) : ''}</td></tr>`).join('') || '<tr><td class="muted">Nothing yet.</td></tr>'}</tbody></table>
       </section>
 
+      <details class="botcard small"><summary>License</summary>
+        <p>Licensed to <b>${esc((licInfo && licInfo.n) || '')}</b> ${licInfo && licInfo.e ? `(${esc(licInfo.e)})` : ''} · ID ${esc(licInfo && licInfo.id)} · ${licInfo && licInfo.exp ? `expires ${new Date(licInfo.exp).toLocaleDateString()}` : 'no expiry'}</p>
+        <button class="danger" id="licRemove">Remove license from this computer</button>
+      </details>
       <details class="botcard small"><summary>Change password</summary>
         <label>Current <input type="password" id="cp0"></label><label>New <input type="password" id="cp1"></label>
         <button id="cpGo">Change</button> <span class="err" id="cpErr"></span>
@@ -146,6 +171,7 @@
 
     // ---- handlers
     $('lockBtn').onclick = async () => { await B.auth.lock(); render(); };
+    $('licRemove').onclick = async () => { if (!confirm('Remove the license? Auto-Trading switches off until a key is entered again.')) return; await B.auth.lock(); await window.PTOLicense.remove(); render(); };
     $('killBtn').onclick = async () => {
       if (!confirm('Stop the bot and close the position it opened?')) return;
       await save((c) => { c.mode = 'off'; });
@@ -194,6 +220,6 @@
   const refresh = () => { clearTimeout(t); t = setTimeout(() => { if (!$('botPanel').hidden && !document.activeElement.matches('input[type=password], input[type=number], input[type=text], input[type=time]')) render(); }, 200); };
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area === 'session' && ch.botUnlocked) refresh();
-    if (area === 'local' && (ch.bot || ch.botState || ch.botJournal || ch.botAccounts || ch.botAuth)) refresh();
+    if (area === 'local' && (ch.bot || ch.botState || ch.botJournal || ch.botAccounts || ch.botAuth || ch.license)) refresh();
   });
 })();

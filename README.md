@@ -152,7 +152,9 @@ view. A **Signal guide** example is included.
 > prop firm / evaluation allows automated trading, test in **Paper** mode first, and start with 1 contract. Backtests and
 > paper results don't guarantee live results. This is not financial advice.
 
-Open the manager, then **🤖 Auto-Trading 🔒**. The first time, you set a password. After that, Auto-Trading needs the
+**Auto-Trading requires a license key.** Open the manager, then **🤖 Auto-Trading 🔒**, paste the license key you received
+after purchase (it starts with `PTO1-`) and click **Activate**. Keys are signed by the seller and checked by the
+extension; a key that's edited, expired or cancelled won't activate. Then you set a password. After that, Auto-Trading needs the
 password to open; it stays unlocked until you press **Lock** or close Chrome. Locking switches the bot off.
 
 ![Auto-Trading settings](docs/images/auto-trading.png)
@@ -308,6 +310,7 @@ page.js                Chart detection, rendering, legend
 content.js             Storage, messaging, engine watchdog, alert logic
 bot.js                 Auto-Trading engine, password, safety limits
 bot-ui.js              Auto-Trading tab (manager)
+license.js             License key check (public key only; keys can't be created from this code)
 background.js          Voice (chrome.tts) and desktop notifications
 sandbox.html/.js       PineTS runner
 settings-ui.js         Inputs / Properties / Style / Visibility dialog

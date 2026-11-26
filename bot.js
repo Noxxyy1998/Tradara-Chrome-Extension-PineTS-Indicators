@@ -126,12 +126,13 @@
       this.busy = Promise.resolve();
       this.ready = this.reload();
       chrome.storage.onChanged.addListener((ch, area) => {
-        if ((area === 'local' && (ch.bot || ch.botState)) || (area === 'session' && ch.botUnlocked)) this.reload();
+        if ((area === 'local' && (ch.bot || ch.botState || ch.license)) || (area === 'session' && ch.botUnlocked)) this.reload();
         // requests from the manager page (it can't reach Tradara itself)
         if (area === 'local' && ch.botKillRequest && ch.botKillRequest.newValue) this.queue(() => this.kill('you (manager)'));
         if (area === 'local' && ch.botAccountsRequest && ch.botAccountsRequest.newValue) this.queue(() => this.fetchAccounts());
       });
       setInterval(() => this.queue(() => this.heartbeat()), 2000);
+      setInterval(() => this.reload(), 3600000); // re-check the license (expiry) every hour
     }
 
     async reload() {
@@ -139,6 +140,8 @@
       this.cfg = await loadCfg();
       this.state = await loadState();
       this.unlocked = await auth.isUnlocked();
+      try { this.licensed = typeof PTOLicense !== 'undefined' ? (await PTOLicense.status()).ok : false; } catch (_) { this.licensed = false; }
+      if (!this.licensed) this.unlocked = false; // Auto-Trading needs an active license
       if (this.unlocked && !this.accountsFetched) { this.accountsFetched = true; setTimeout(() => this.queue(() => this.fetchAccounts()), 1500); }
       this.publish();
     }
