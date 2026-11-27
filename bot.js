@@ -114,6 +114,13 @@
     return a <= b ? m >= a && m <= b : m >= a || m <= b; // window may wrap past midnight
   }
 
+  // Temporary connection problems between Tradara and the broker (no order was accepted)
+  const VENUE_PAUSE_MS = 3 * 60 * 1000;
+  function isConnectionError(e) {
+    const m = String((e && e.message) || e || '');
+    return /session (is )?(connecting|unavailable|disconnected|not connected)|venue session|not connected|reconnect|temporarily unavailable|timed? ?out|did not respond|HTTP 50[234]|gateway|ECONN|network/i.test(m);
+  }
+
   // ---------- engine (runs in the content script on the Tradara page) ----------
   class Engine {
     constructor(opts) {
@@ -247,6 +254,7 @@
         if (c.exits.onOpposite !== 'reverse') return;
       }
       if (s.position && s.position.dir === sgl.dir) return skip(`already ${side.toLowerCase()}`);
+      if (c.mode === 'live' && s.venuePauseUntil && Date.now() < s.venuePauseUntil) return skip(`paused after a broker connection error, resumes ${new Date(s.venuePauseUntil).toLocaleTimeString()}`);
       if (!inWindow(sgl.t, c.risk.start, c.risk.end)) return skip(`outside trading hours ${c.risk.start}–${c.risk.end} ET`);
       if (s.tradesToday >= c.risk.maxTradesPerDay) return skip(`max ${c.risk.maxTradesPerDay} trades today`);
       if (c.risk.maxDailyLoss > 0 && s.pnlToday <= -Math.abs(c.risk.maxDailyLoss)) { await this.halt(`daily loss limit reached`); return; }
@@ -271,7 +279,31 @@
           const pos = await this.broker.call('position', { accountId: c.accountId, instrumentId: inst.id });
           if (pos.qty !== 0) { await this.halt(`the account already has ${pos.qty} ${inst.symbol} open that the bot didn't open`); return; }
           equityAtEntry = Number.isFinite(risk.equity) ? risk.equity : null;
-          await this.broker.call('placeBracket', { accountId: c.accountId, instrumentId: inst.id, symbol: inst.symbol, side: sgl.dir > 0 ? 'BUY' : 'SELL', qty, stopTicks: c.exits.stopTicks, targetTicks: c.exits.targetTicks });
+          // place the order ONCE. If the broker link is down (e.g. "Tradovate session is connecting") the bot does NOT
+          // resend: repeated orders against a reconnecting broker link only add load. It checks nothing went through,
+          // skips the signal and pauses new entries for a few minutes.
+          const orderKey = `pto-${sgl.t}-${sgl.dir}-${Math.random().toString(36).slice(2, 10)}`;
+          const args = { accountId: c.accountId, instrumentId: inst.id, symbol: inst.symbol, side: sgl.dir > 0 ? 'BUY' : 'SELL', qty, stopTicks: c.exits.stopTicks, targetTicks: c.exits.targetTicks, key: orderKey };
+          let placed = false, lastErr = null;
+          try { await this.broker.call('placeBracket', args); placed = true; }
+          catch (e) { lastErr = e; if (!isConnectionError(e)) throw e; /* a real rejection: bot stops (below) */ }
+          if (!placed) {
+            // still not connected: make sure nothing went through late, then skip this signal and keep running
+            await new Promise((r) => setTimeout(r, 3000));
+            const late = await this.broker.call('position', { accountId: c.accountId, instrumentId: inst.id }).catch(() => ({ qty: 0 }));
+            if (late.qty === 0) {
+              this.state.venueFails = (this.state.venueFails || 0) + 1;
+              this.state.venuePauseUntil = Date.now() + VENUE_PAUSE_MS;
+              await saveState(this.state);
+              const msg = String(lastErr && lastErr.message || lastErr);
+              await journal({ kind: 'skip', mode: 'live', text: `${label}: skipped, broker not connected (${msg}). No order was placed. New entries paused ${VENUE_PAUSE_MS / 60000} min.` });
+              if (this.state.venueFails >= 2) { await this.halt(`broker connection failed on ${this.state.venueFails} signals in a row (${msg})`); return; }
+              this.say(`Signal skipped. ${/tradovate/i.test(msg) ? 'Tradovate' : 'The broker'} isn't connected. Pausing new trades for ${VENUE_PAUSE_MS / 60000} minutes.`, '🤖 Signal skipped: broker not connected', { voice: true, notify: true });
+              return;
+            }
+            // it did go through: carry on and manage it (its stop and target are attached on Tradara)
+          }
+          this.state.venueFails = 0;
           // confirm the fill
           let filled = null;
           for (let k = 0; k < 10 && !filled; k++) {

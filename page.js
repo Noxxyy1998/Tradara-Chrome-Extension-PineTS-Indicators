@@ -125,7 +125,7 @@
       return { locked: !!j.is_locked, reason: j.lock_reason || j.lockout_reason || '', equity: Number(j.equity), balance: Number(j.balance) };
     },
     // market entry with stop-loss and take-profit attached on Tradara's servers (OTOCO bracket)
-    async placeBracket({ accountId, instrumentId, symbol, side, qty, stopTicks, targetTicks }) {
+    async placeBracket({ accountId, instrumentId, symbol, side, qty, stopTicks, targetTicks, key }) {
       const dir = side === 'BUY' ? 1 : -1;
       const exitSide = side === 'BUY' ? 'SELL' : 'BUY';
       const base = { account_id: accountId, instrument_id: instrumentId, quantity: qty };
@@ -137,7 +137,8 @@
         : legs.length === 1 ? { account_id: accountId, group_type: 'OTO', trigger_order: entry, triggered_order: legs[0] }
         : null;
       if (!body) throw new Error('A stop-loss is required');
-      return api('/v1/orders/groups', { method: 'POST', body, key: uuid() });
+      // the caller passes one key per signal: retries reuse it, so Tradara can never place the order twice
+      return api('/v1/orders/groups', { method: 'POST', body, key: key || uuid() });
     },
     async flatten({ accountId }) {
       await api('/v1/orders/flatten', { method: 'POST', body: { account_id: accountId }, key: uuid() });

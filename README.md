@@ -182,6 +182,10 @@ losses in a row, max contracts, and a trading-hours window (ET). It also stops o
 account, if the entry isn't filled, or if the account already has a position it didn't open. It only runs in one Tradara
 tab at a time.
 
+**Broker not connected** (e.g. *"Tradovate session is connecting"*): the bot sends the order once and never resends it.
+It checks that nothing went through, skips that signal and pauses new entries for 3 minutes. If it happens again on the
+next signal, the bot stops. Any other order rejection stops the bot straight away.
+
 **Stop button**: **⏹** in the chart legend, or **Stop bot & close its position** in the manager. This switches the bot
 off and closes the position *the bot opened*; it never touches trades you placed yourself.
 
